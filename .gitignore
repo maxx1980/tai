@@ -1,0 +1,11 @@
+# Go binary
+/webssh
+
+# Frontend
+web/node_modules/
+web/dist/
+
+# Local data / editor
+*.db
+*.db-*
+.DS_Store
