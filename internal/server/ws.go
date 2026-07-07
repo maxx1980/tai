@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"encoding/json"
 	"io"
 	"log"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"webssh/internal/askpass"
 	"webssh/internal/pty"
 )
 
@@ -55,17 +55,24 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	sess, err := pty.Start(s.sshArgs(h))
+	// When the host has a saved password, wire ssh to answer its own password
+	// (and new-host-key) prompts via the SSH_ASKPASS helper, so the user isn't
+	// prompted in the browser terminal.
+	var extraEnv []string
+	if pw := s.st.GetHostPassword(h.ID); pw != "" {
+		if helper, herr := askpass.Ensure(s.paths.DataDir); herr == nil {
+			extraEnv = askpass.Env(helper, pw)
+		} else {
+			log.Printf("askpass helper: %v", herr)
+		}
+	}
+
+	sess, err := pty.Start(s.sshArgs(h), extraEnv)
 	if err != nil {
 		conn.WriteMessage(websocket.TextMessage, []byte("failed to start ssh: "+err.Error()))
 		return
 	}
 	defer sess.Close()
-
-	// A saved host password is auto-typed into the PTY the first time ssh
-	// prompts for one (there is no sshpass on this system).
-	savedPassword := s.st.GetHostPassword(h.ID)
-	pwSent := false
 
 	// PTY output -> browser (binary frames).
 	go func() {
@@ -79,12 +86,7 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 		for {
 			n, err := sess.Pty.Read(buf)
 			if n > 0 {
-				chunk := buf[:n]
-				if savedPassword != "" && !pwSent && bytes.Contains(bytes.ToLower(chunk), []byte("assword:")) {
-					pwSent = true
-					io.WriteString(sess.Pty, savedPassword+"\n")
-				}
-				if werr := conn.WriteMessage(websocket.BinaryMessage, chunk); werr != nil {
+				if werr := conn.WriteMessage(websocket.BinaryMessage, buf[:n]); werr != nil {
 					return
 				}
 			}

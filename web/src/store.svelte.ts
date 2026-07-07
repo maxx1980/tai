@@ -17,6 +17,23 @@ export const app = $state<AppState>({
 // until checkLock proves a password is set and the session is locked.
 export const lock = $state({ has_password: false, unlocked: true });
 
+// Per-host reachability, keyed by host id: "green" | "yellow" | "red". A host id
+// absent from the map is "unknown" (not yet probed). Populated by refreshHealth,
+// which the app polls on a timer.
+export const health = $state<{ map: Record<number, string> }>({ map: {} });
+
+export async function refreshHealth(): Promise<void> {
+  try {
+    const h = await api.get<Record<string, string>>("/api/health");
+    const next: Record<number, string> = {};
+    for (const [k, v] of Object.entries(h ?? {})) next[Number(k)] = v;
+    health.map = next;
+  } catch {
+    // Silently ignore (e.g. 423 while locked, or a transient network blip) so
+    // the status dots simply don't update rather than spamming toasts.
+  }
+}
+
 export async function checkLock(): Promise<void> {
   const s = await lockstate();
   lock.has_password = s.has_password;

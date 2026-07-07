@@ -9,6 +9,7 @@
   --accent-fg: #ffffff;
   --danger: #d13438;
   --success: #1a7f37;
+  --warn: #d4a72c;
   --radius: 8px;
   --shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   color-scheme: light;
@@ -27,6 +28,7 @@
     --accent-fg: #0b1220;
     --danger: #f26d70;
     --success: #56d364;
+    --warn: #e3b341;
     --shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
     color-scheme: dark;
   }
@@ -42,6 +44,7 @@
   --accent-fg: #0b1220;
   --danger: #f26d70;
   --success: #56d364;
+  --warn: #e3b341;
   --shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
   color-scheme: dark;
 }

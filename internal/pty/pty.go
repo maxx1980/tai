@@ -17,10 +17,13 @@ type Session struct {
 
 // Start launches `ssh` with the given arguments in a new PTY. The caller builds
 // explicit connection arguments from the host record so the terminal works
-// whether or not the alias has been exported to ssh_config.
-func Start(args []string) (*Session, error) {
+// whether or not the alias has been exported to ssh_config. extraEnv holds
+// additional VAR=value entries (e.g. SSH_ASKPASS wiring) appended to the base
+// environment.
+func Start(args []string, extraEnv []string) (*Session, error) {
 	cmd := exec.Command("ssh", args...)
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	cmd.Env = append(cmd.Env, extraEnv...)
 	f, err := pty.Start(cmd)
 	if err != nil {
 		return nil, err

@@ -1,7 +1,7 @@
 <script lang="ts">
   import Fuse from "fuse.js";
   import { api, ApiError } from "./api";
-  import { app, refresh, notify } from "./store.svelte";
+  import { app, health, refresh, notify } from "./store.svelte";
   import type { Host, Group } from "./types";
 
   let {
@@ -34,6 +34,20 @@
 
   function isMounted(h: Host): boolean {
     return mountedPoints.has(`${baseDir}/${h.alias}`);
+  }
+
+  // Human-readable tooltip for a host's reachability state.
+  function healthTitle(state: string | undefined): string {
+    switch (state) {
+      case "green":
+        return "Онлайн — SSH-порт открыт";
+      case "yellow":
+        return "Отвечает на ping, но SSH-порт закрыт";
+      case "red":
+        return "Офлайн — не отвечает";
+      default:
+        return "Проверка…";
+    }
   }
 
   // ---- tree helpers ----
@@ -407,6 +421,10 @@
           role="listitem"
         >
           <div class="row">
+            <span
+              class="hdot {health.map[h.id] ?? 'unknown'}"
+              title={healthTitle(health.map[h.id])}
+            ></span>
             <strong title="Drag onto a group in the sidebar to move">⠿ {h.alias}</strong>
             {#if isMounted(h)}<span class="tag" title="sshfs mounted">mounted</span>{/if}
             <div class="spacer"></div>
@@ -523,6 +541,15 @@
   }
   .hcard.dragging { opacity: 0.4; }
   .hcard strong { cursor: grab; }
+  .hdot {
+    flex: none;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--muted);
+  }
+  .hdot.green { background: var(--success); }
+  .hdot.yellow { background: var(--warn); }
+  .hdot.red { background: var(--danger); }
   .addr { font-size: 12.5px; }
   .actions { flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 </style>

@@ -23,6 +23,7 @@ import (
 	"sync"
 
 	"webssh/internal/config"
+	"webssh/internal/health"
 	"webssh/internal/sftpbrowse"
 	"webssh/internal/store"
 )
@@ -34,6 +35,7 @@ type Server struct {
 	token  string
 	assets fs.FS
 	sftp   *sftpbrowse.Manager
+	health *health.Checker
 	mux    *http.ServeMux
 
 	mu       sync.Mutex          // guards sessions
@@ -45,13 +47,14 @@ type Server struct {
 const sessionCookie = "webssh_session"
 
 // New builds a Server. assets is the embedded SPA filesystem (rooted at dist).
-func New(st *store.Store, paths config.Paths, token string, assets fs.FS) *Server {
+func New(st *store.Store, paths config.Paths, token string, assets fs.FS, hc *health.Checker) *Server {
 	s := &Server{
 		st:       st,
 		paths:    paths,
 		token:    token,
 		assets:   assets,
 		sftp:     sftpbrowse.NewManager(paths.Home, filepath.Join(paths.DataDir, "keys")),
+		health:   hc,
 		mux:      http.NewServeMux(),
 		sessions: map[string]struct{}{},
 	}
@@ -149,6 +152,7 @@ func (s *Server) routes() {
 		s.mux.Handle(pattern, s.requireAuth(s.requireUnlocked(h)))
 	}
 	api("GET /api/state", s.handleState)
+	api("GET /api/health", s.handleHealth)
 
 	api("POST /api/lock", s.handleLock)
 	api("PUT /api/settings/password", s.handleSetPassword)

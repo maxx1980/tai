@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, lock, refresh, checkLock, notify } from "./store.svelte";
+  import { app, lock, refresh, refreshHealth, checkLock, notify } from "./store.svelte";
   import { lock as apiLock } from "./api";
   import { emptyHost, type Host } from "./types";
   import Inventory from "./Inventory.svelte";
@@ -25,6 +25,15 @@
       .then(() => refresh())
       .then(() => (loaded = true))
       .catch((e) => notify("error", "Failed to load: " + e));
+  });
+
+  // Poll host reachability every 60s once loaded and unlocked; the backend
+  // re-probes on the same cadence.
+  $effect(() => {
+    if (!loaded || !lock.unlocked) return;
+    refreshHealth();
+    const id = setInterval(refreshHealth, 60000);
+    return () => clearInterval(id);
   });
 
   async function doLock() {

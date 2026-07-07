@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"webssh/internal/store"
@@ -45,7 +46,13 @@ func expand(tmpl string, v Vars) string {
 // running after the request returns. The command is parsed with shell-like
 // field splitting (quotes respected) rather than passed to a shell, so the
 // template values are not interpreted as shell code.
-func Spawn(tmpl string, v Vars) error {
+//
+// When sshWrapper is non-empty, the first bare `ssh` command word in the
+// expanded template is replaced with that wrapper path (which self-sets the
+// SSH_ASKPASS environment and execs the real ssh). This delivers a saved
+// password to ssh even under terminal emulators that run a single background
+// server we cannot pass environment to.
+func Spawn(tmpl string, v Vars, sshWrapper string) error {
 	expanded := expand(tmpl, v)
 	fields, err := splitFields(expanded)
 	if err != nil {
@@ -53,6 +60,14 @@ func Spawn(tmpl string, v Vars) error {
 	}
 	if len(fields) == 0 {
 		return fmt.Errorf("empty command")
+	}
+	if sshWrapper != "" {
+		for i, f := range fields {
+			if filepath.Base(f) == "ssh" {
+				fields[i] = sshWrapper
+				break
+			}
+		}
 	}
 	cmd := exec.Command(fields[0], fields[1:]...)
 	cmd.Stdout = os.Stderr

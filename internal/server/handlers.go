@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"webssh/internal/askpass"
 	"webssh/internal/config"
 	"webssh/internal/keys"
 	"webssh/internal/launcher"
@@ -129,6 +130,13 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		"settings":    settings,
 		"mounts":      mounts,
 	})
+}
+
+// handleHealth returns the current per-host reachability snapshot as a JSON
+// object keyed by host id: {"1":"green","2":"red",...}. Hosts not yet probed are
+// simply absent (the SPA renders those as "unknown").
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, s.health.Snapshot())
 }
 
 // ---- hosts ----
@@ -662,7 +670,27 @@ func (s *Server) launch(w http.ResponseWriter, r *http.Request, cmdKey string) {
 	}
 	settings := s.settingsWithDefaults()
 	mp := mount.Mountpoint(settings[config.KeyMountBaseDir], h)
-	if err := launcher.Spawn(settings[cmdKey], launcher.VarsFromHost(h, mp)); err != nil {
+
+	// For the native terminal, feed a saved password to ssh via a per-host
+	// wrapper that self-sets SSH_ASKPASS (env alone doesn't reach ssh under
+	// single-server terminal emulators). The file manager launch (xdg-open on a
+	// mountpoint) spawns no ssh, so it needs nothing.
+	var sshWrapper string
+	if cmdKey == config.KeyTerminalCmd {
+		if pw := s.st.GetHostPassword(h.ID); pw != "" {
+			if helper, herr := askpass.Ensure(s.paths.DataDir); herr == nil {
+				if wp, werr := askpass.Wrapper(s.paths.DataDir, h.ID, helper, pw); werr == nil {
+					sshWrapper = wp
+				} else {
+					log.Printf("askpass wrapper: %v", werr)
+				}
+			} else {
+				log.Printf("askpass helper: %v", herr)
+			}
+		}
+	}
+
+	if err := launcher.Spawn(settings[cmdKey], launcher.VarsFromHost(h, mp), sshWrapper); err != nil {
 		writeErr(w, 500, err)
 		return
 	}

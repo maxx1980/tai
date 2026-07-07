@@ -23,6 +23,7 @@ import (
 	webassets "webssh/web"
 
 	"webssh/internal/config"
+	"webssh/internal/health"
 	"webssh/internal/server"
 	"webssh/internal/store"
 )
@@ -61,7 +62,13 @@ func run(addr string, noOpen bool) error {
 		return err
 	}
 
-	srv := server.New(st, paths, token, webassets.FS())
+	// Background reachability checks feed the inventory status dots.
+	hcCtx, hcCancel := context.WithCancel(context.Background())
+	defer hcCancel()
+	hc := health.New(st)
+	go hc.Run(hcCtx)
+
+	srv := server.New(st, paths, token, webassets.FS(), hc)
 
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
