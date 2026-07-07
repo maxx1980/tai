@@ -16,7 +16,9 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -24,6 +26,7 @@ import (
 
 	"webssh/internal/config"
 	"webssh/internal/health"
+	"webssh/internal/launcher"
 	"webssh/internal/server"
 	"webssh/internal/store"
 )
@@ -57,7 +60,7 @@ func run(addr string, noOpen bool) error {
 	}
 	defer st.Close()
 
-	token, err := randomToken()
+	token, err := loadOrCreateAPIKey(paths.DataDir)
 	if err != nil {
 		return err
 	}
@@ -86,7 +89,7 @@ func run(addr string, noOpen bool) error {
 	}()
 
 	if !noOpen {
-		openBrowser(url)
+		openBrowser(url, st.GetSetting(config.KeyBrowserCmd, ""))
 	}
 
 	// Graceful shutdown on SIGINT/SIGTERM.
@@ -124,19 +127,59 @@ func randomToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-func openBrowser(url string) {
-	var cmd string
-	var args []string
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = "open"
-	case "windows":
-		cmd, args = "rundll32", []string{"url.dll,FileProtocolHandler"}
-	default:
-		cmd = "xdg-open"
+// loadOrCreateAPIKey returns a stable API key for authenticating the SPA to the
+// API, generating and persisting one (mode 0600) on first run. Unlike a random
+// per-start token, this keeps the launch URL constant across restarts.
+func loadOrCreateAPIKey(dataDir string) (string, error) {
+	path := filepath.Join(dataDir, "apikey")
+	if b, err := os.ReadFile(path); err == nil {
+		if k := strings.TrimSpace(string(b)); k != "" {
+			return k, nil
+		}
 	}
-	args = append(args, url)
-	if err := exec.Command(cmd, args...).Start(); err != nil {
+	k, err := randomToken()
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(path, []byte(k), 0o600); err != nil {
+		return "", err
+	}
+	return k, nil
+}
+
+// openBrowser opens rawURL. When browserCmd is set it is used (with {{url}}
+// substituted, or the URL appended when the placeholder is absent); otherwise
+// the platform default handler is used.
+func openBrowser(rawURL, browserCmd string) {
+	var name string
+	var args []string
+
+	if strings.TrimSpace(browserCmd) != "" {
+		hasPlaceholder := strings.Contains(browserCmd, "{{url}}")
+		tmpl := strings.ReplaceAll(browserCmd, "{{url}}", rawURL)
+		if fields, err := launcher.SplitFields(tmpl); err != nil || len(fields) == 0 {
+			log.Printf("invalid browser command %q (%v); using system default", browserCmd, err)
+		} else {
+			name, args = fields[0], fields[1:]
+			if !hasPlaceholder {
+				args = append(args, rawURL)
+			}
+		}
+	}
+
+	if name == "" {
+		switch runtime.GOOS {
+		case "darwin":
+			name = "open"
+		case "windows":
+			name, args = "rundll32", []string{"url.dll,FileProtocolHandler"}
+		default:
+			name = "xdg-open"
+		}
+		args = append(args, rawURL)
+	}
+
+	if err := exec.Command(name, args...).Start(); err != nil {
 		log.Printf("could not open browser (%v); open the URL above manually", err)
 	}
 }

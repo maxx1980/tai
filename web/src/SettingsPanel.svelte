@@ -16,7 +16,7 @@
   let fileInput: HTMLInputElement;
 
   // ---- Security & backup ----
-  type SecModal = null | "password" | "backup" | "restore" | "reset";
+  type SecModal = null | "password" | "backup" | "restore" | "reset" | "disableauth";
   let modal = $state<SecModal>(null);
   let curPw = $state("");
   let newPw = $state("");
@@ -139,6 +139,31 @@
     }
   }
 
+  // Toggle the API-token requirement. Disabling is gated by a warning modal
+  // (see the "disableauth" modal); re-enabling is immediate.
+  async function applyAuthDisabled(disabled: boolean) {
+    busy = true;
+    try {
+      await api.put("/api/settings", { auth_disabled: disabled ? "1" : "" });
+      await refresh();
+      notify(disabled ? "info" : "success", disabled ? "API token disabled" : "API token now required");
+      modal = null;
+    } catch (e) {
+      notify("error", String(e));
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function doRestart() {
+    notify("info", "Restarting…");
+    try {
+      await api.post("/api/restart");
+    } catch {
+      // The daemon replaces its process image, so the connection drops — expected.
+    }
+  }
+
   async function importConfig(path?: string) {
     busy = true;
     try {
@@ -202,6 +227,15 @@
       <input id="files" class="mono" bind:value={form.files_cmd} />
     </div>
     <div class="field">
+      <label for="browser">Browser command</label>
+      <input id="browser" class="mono" bind:value={form.browser_cmd}
+        placeholder="empty = system default (xdg-open)" />
+      <span class="muted" style="font-size:12px">
+        e.g. <span class="mono">firefox</span> or <span class="mono">chromium --new-window {"{{url}}"}</span>.
+        Used when webssh opens on startup.
+      </span>
+    </div>
+    <div class="field">
       <label for="mount">sshfs mount base directory</label>
       <input id="mount" class="mono" bind:value={form.mount_base_dir} />
     </div>
@@ -213,7 +247,14 @@
         <option value="dark">Dark</option>
       </select>
     </div>
-    <button class="primary" onclick={save} disabled={busy}>Save settings</button>
+    <div class="row" style="flex-wrap:wrap">
+      <button class="primary" onclick={save} disabled={busy}>Save settings</button>
+      <button onclick={doRestart} disabled={busy}>Restart app</button>
+    </div>
+    <span class="muted" style="font-size:12px">
+      Restart relaunches the daemon and reopens the app in your browser
+      (per the browser command). This tab briefly loses connection.
+    </span>
   </section>
 
   <section>
@@ -270,6 +311,27 @@
         Set a master password to enable backup and reset.
       </p>
     {/if}
+
+    <hr />
+
+    <label class="pick">
+      <input type="checkbox" style="width:auto" disabled={busy}
+        checked={app.settings.auth_disabled !== "1"}
+        onchange={(e) => {
+          if (!e.currentTarget.checked) {
+            e.currentTarget.checked = true; // revert until confirmed
+            modal = "disableauth";
+          } else {
+            applyAuthDisabled(false);
+          }
+        }} />
+      <span>Require API token (recommended)</span>
+    </label>
+    <p class="muted" style="margin-bottom:0">
+      The token authenticates the browser to the local API. Turning it off makes
+      the API reachable by any local process — leave it on unless you understand
+      the risk.
+    </p>
   </section>
 </div>
 
@@ -352,6 +414,29 @@
         <button onclick={() => (modal = null)}>Cancel</button>
         <button class="primary" onclick={doRestore} disabled={busy || !restoreData || !opPw}>
           Restore
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if modal === "disableauth"}
+  <div class="overlay" onclick={() => (modal = null)}>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="modal" onclick={(e) => e.stopPropagation()}>
+      <h2>Disable API token?</h2>
+      <div class="warn">
+        ⚠ Insecure. Without the token, <strong>any local process or user</strong>
+        on this machine can read your whole inventory and open SSH sessions using
+        your saved passwords and keys. Loopback binding and the Origin check on
+        mutations still apply (so remote and web-page access stay blocked), but
+        local access becomes open.
+      </div>
+      <div class="row">
+        <div class="spacer"></div>
+        <button onclick={() => (modal = null)}>Cancel</button>
+        <button class="danger" onclick={() => applyAuthDisabled(true)} disabled={busy}>
+          Disable anyway
         </button>
       </div>
     </div>

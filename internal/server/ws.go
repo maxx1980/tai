@@ -28,7 +28,7 @@ type ctrlMsg struct {
 // handleTerminal bridges a browser xterm.js terminal to `ssh <alias>` over a PTY.
 // The websocket carries the token as a query param (browsers can't set headers).
 func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
-	if !s.validToken(r.URL.Query().Get("token")) {
+	if !s.authDisabled.Load() && !s.validToken(r.URL.Query().Get("token")) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}

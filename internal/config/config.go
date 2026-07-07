@@ -10,8 +10,13 @@ import (
 const (
 	KeyTerminalCmd  = "terminal_cmd"
 	KeyFilesCmd     = "files_cmd"
+	KeyBrowserCmd   = "browser_cmd"
 	KeyMountBaseDir = "mount_base_dir"
 	KeyTheme        = "theme"
+
+	// KeyAuthDisabled ("1" = on) turns off the API-key check. Not a secret; the
+	// loopback bind and Origin check on mutations still apply.
+	KeyAuthDisabled = "auth_disabled"
 
 	// KeyMasterPassword stores the argon2id hash of the master password. It is
 	// reserved: never returned to the SPA nor writable via PUT /api/settings.
@@ -22,10 +27,14 @@ const (
 func Defaults(home string) map[string]string {
 	return map[string]string{
 		// {{alias}} {{user}} {{host}} {{port}} {{mountpoint}} are substituted at spawn time.
-		KeyTerminalCmd:  "gnome-terminal -- ssh {{alias}}",
-		KeyFilesCmd:     "xdg-open {{mountpoint}}",
+		KeyTerminalCmd: "gnome-terminal -- ssh {{alias}}",
+		KeyFilesCmd:    "xdg-open {{mountpoint}}",
+		// Empty means "use the system default browser" (xdg-open / open / rundll32).
+		// A custom command may use the {{url}} placeholder, else the URL is appended.
+		KeyBrowserCmd:   "",
 		KeyMountBaseDir: filepath.Join(home, "mnt", "webssh"),
 		KeyTheme:        "system",
+		KeyAuthDisabled: "",
 	}
 }
 

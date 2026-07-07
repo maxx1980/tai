@@ -80,6 +80,10 @@ func Spawn(tmpl string, v Vars, sshWrapper string) error {
 	return nil
 }
 
+// SplitFields splits a command line into fields honoring quotes, without any
+// shell metacharacter expansion. Exported for reuse (e.g. the browser command).
+func SplitFields(s string) ([]string, error) { return splitFields(s) }
+
 // splitFields splits a command line into fields, honoring single and double
 // quotes. It intentionally does NOT expand shell metacharacters.
 func splitFields(s string) ([]string, error) {

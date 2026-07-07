@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"webssh/internal/askpass"
 	"webssh/internal/config"
@@ -714,5 +716,30 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Keep the cached auth-disabled flag in sync with the stored setting.
+	s.authDisabled.Store(s.st.GetSetting(config.KeyAuthDisabled, "") == "1")
 	writeJSON(w, 200, s.settingsWithDefaults())
+}
+
+// handleRestart re-executes the daemon in place: it replies, then replaces the
+// process image with a fresh copy (same PID, same args). The listening socket is
+// close-on-exec so the port frees up and the new image rebinds (SO_REUSEADDR) and
+// reopens the browser per browser_cmd. Active connections drop for ~0.5s. Unix
+// only, which matches the rest of the app (pty, xdg-open).
+func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]any{"restarting": true})
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+	go func() {
+		time.Sleep(400 * time.Millisecond)
+		exe, err := os.Executable()
+		if err != nil {
+			log.Printf("restart: cannot resolve executable: %v", err)
+			return
+		}
+		if err := syscall.Exec(exe, os.Args, os.Environ()); err != nil {
+			log.Printf("restart: exec failed: %v", err)
+		}
+	}()
 }

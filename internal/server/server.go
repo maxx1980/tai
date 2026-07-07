@@ -21,6 +21,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"webssh/internal/config"
 	"webssh/internal/health"
@@ -37,6 +38,8 @@ type Server struct {
 	sftp   *sftpbrowse.Manager
 	health *health.Checker
 	mux    *http.ServeMux
+
+	authDisabled atomic.Bool // when true, the API-key check is skipped (user opt-in)
 
 	mu       sync.Mutex          // guards sessions
 	sessions map[string]struct{} // valid unlock-session cookie values
@@ -58,6 +61,7 @@ func New(st *store.Store, paths config.Paths, token string, assets fs.FS, hc *he
 		mux:      http.NewServeMux(),
 		sessions: map[string]struct{}{},
 	}
+	s.authDisabled.Store(st.GetSetting(config.KeyAuthDisabled, "") == "1")
 	s.routes()
 	return s
 }
@@ -155,6 +159,7 @@ func (s *Server) routes() {
 	api("GET /api/health", s.handleHealth)
 
 	api("POST /api/lock", s.handleLock)
+	api("POST /api/restart", s.handleRestart)
 	api("PUT /api/settings/password", s.handleSetPassword)
 	api("POST /api/backup", s.handleBackup)
 	api("POST /api/restore", s.handleRestore)
@@ -215,7 +220,7 @@ func (s *Server) routes() {
 // requireAuth enforces the startup token, and a loopback Origin on mutations.
 func (s *Server) requireAuth(next http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !s.validToken(r.Header.Get("X-Auth-Token")) {
+		if !s.authDisabled.Load() && !s.validToken(r.Header.Get("X-Auth-Token")) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
