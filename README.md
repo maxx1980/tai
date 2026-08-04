@@ -43,6 +43,8 @@ Requirements: Go ≥ 1.25, Node ≥ 20, `rsvg-convert` (package `librsvg2-bin`, 
 render the icons), and `sshfs` / `ssh-keygen` on `PATH`.
 
 ```sh
+git clone https://github.com/maxx1980/tai
+cd tai
 make deps    # install frontend deps (once)
 make run     # build SPA + binary, start server, open browser
 ```
@@ -50,7 +52,8 @@ make run     # build SPA + binary, start server, open browser
 Or manually:
 
 ```sh
-cd web && npm install && npm run build && cd ..
+git clone https://github.com/maxx1980/tai
+cd tai && npm install && npm run build && cd ..
 go build -o webssh ./cmd/webssh
 ./webssh                 # prints http://127.0.0.1:8022/?token=…
 ```
@@ -62,6 +65,8 @@ Flags: `--addr 127.0.0.1:8022`, `--no-open`.
 `install.sh` builds everything and registers webssh in the application menu:
 
 ```sh
+git clone https://github.com/maxx1980/tai
+cd tai
 ./install.sh          # deps if needed + build + desktop entry
 ./install.sh --run    # ...and start the server afterwards
 ```
