@@ -35,7 +35,8 @@ Do not expose it to the network.
 
 ## Build & run
 
-Requirements: Go ≥ 1.25, Node ≥ 20, and `sshfs` / `ssh-keygen` on `PATH`.
+Requirements: Go ≥ 1.25, Node ≥ 20, `rsvg-convert` (package `librsvg2-bin`, used to
+render the icons), and `sshfs` / `ssh-keygen` on `PATH`.
 
 ```sh
 make deps    # install frontend deps (once)
@@ -52,11 +53,49 @@ go build -o webssh ./cmd/webssh
 
 Flags: `--addr 127.0.0.1:8022`, `--no-open`.
 
+## Install (Linux desktop)
+
+`install.sh` builds everything and registers webssh in the application menu:
+
+```sh
+./install.sh          # deps if needed + build + desktop entry
+./install.sh --run    # ...and start the server afterwards
+```
+
+It installs into your home directory only — no root, no system paths:
+
+- icons → `~/.local/share/icons/hicolor/<size>/apps/webssh.png` (+ `scalable/…svg`);
+- launcher → `~/.local/share/applications/webssh.desktop`, with `Exec` pointing at
+  the binary in this checkout, so don't move the directory afterwards.
+
+The same steps are available as `make install-desktop`; `make uninstall-desktop`
+removes both. Some desktops only pick up a new launcher after a re-login.
+
+## Icons
+
+All icons are rendered from one master, `assets/icon.svg`, by `assets/gen-icons.sh`
+(`make icons`). `make build` runs it automatically, so the favicons land in
+`web/public/` before Vite copies them into the embedded `web/dist/`.
+
+An ELF binary cannot carry an icon, which is why Linux gets a `.desktop` entry
+instead. Windows can, via a PE resource:
+
+```sh
+make build-windows    # go-winres builds the .syso, then GOOS=windows go build
+```
+
+That produces `webssh.exe` with the icon and version info embedded. Note it only
+*builds* — the pty layer is a stub on Windows and the default terminal/mount
+commands are Linux ones, so it does not run there yet.
+
 ## Layout
 
 - `cmd/webssh` — entry point (flags, token, loopback bind).
 - `internal/{store,sshconfig,keys,mount,launcher,pty,server,config}` — backend.
 - `web/` — Svelte + Vite SPA, embedded into the binary via `web/embed.go`.
+- `assets/` — master `icon.svg` and the script that renders every raster size.
+- `packaging/` — `.desktop` template used by `make install-desktop`.
+- `winres/` — resource manifest for the Windows icon and version info.
 
 ## Roadmap (v2)
 
