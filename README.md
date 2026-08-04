@@ -68,8 +68,21 @@ It installs into your home directory only — no root, no system paths:
 - launcher → `~/.local/share/applications/webssh.desktop`, with `Exec` pointing at
   the binary in this checkout, so don't move the directory afterwards.
 
-The same steps are available as `make install-desktop`; `make uninstall-desktop`
-removes both. Some desktops only pick up a new launcher after a re-login.
+The same steps are available as `make install-desktop`. Some desktops only pick
+up a new launcher after a re-login.
+
+To remove it again:
+
+```sh
+./uninstall.sh          # stop the daemon, unmount sshfs, drop launcher + binary
+./uninstall.sh --purge  # ...and delete the database, keys and ~/.ssh integration
+```
+
+The plain form keeps everything you own, so reinstalling resumes where you left
+off. `--purge` asks before deleting and backs up `~/.ssh/config` before dropping
+the `Include` line. Unmounting comes first on purpose — deleting a directory
+while an sshfs mount is live would delete files on the remote host. If you only
+want the launcher gone, `make uninstall-desktop` still does just that.
 
 ## Icons
 
