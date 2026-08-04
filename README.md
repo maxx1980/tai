@@ -1,3 +1,5 @@
+**English** · [Українська](README.uk.md) · [Русский](README.ru.md)
+
 # webssh
 
 A **local web control panel** for managing lots of SSH connections. It is *not* a
@@ -53,7 +55,7 @@ Or manually:
 
 ```sh
 git clone https://github.com/maxx1980/tai
-cd tai && npm install && npm run build && cd ..
+cd tai/web && npm install && npm run build && cd ..
 go build -o webssh ./cmd/webssh
 ./webssh                 # prints http://127.0.0.1:8022/?token=…
 ```
