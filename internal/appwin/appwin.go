@@ -65,8 +65,9 @@ type UI interface {
 // an unbuilt or unavailable webview falls back to an app window, and an app
 // window with no chromium browser installed falls back to the browser mode
 // (which itself ends at xdg-open). An explicit browserCmd always wins, since
-// it is the user stating exactly what they want.
-func New(mode Mode, p config.Paths, browserCmd string) UI {
+// it is the user stating exactly what they want. appBrowser pins which browser
+// drives the app window; empty means detect one.
+func New(mode Mode, p config.Paths, browserCmd, appBrowser string) UI {
 	if browserCmd != "" {
 		return &browserUI{cmd: browserCmd}
 	}
@@ -80,7 +81,7 @@ func New(mode Mode, p config.Paths, browserCmd string) UI {
 		}
 		fallthrough
 	case ModeApp:
-		if exe, ok := findChromium(); ok {
+		if exe, ok := findChromium(appBrowser); ok {
 			return &chromiumUI{exe: exe, profileDir: p.BrowserDir}
 		}
 		log.Printf("no chromium-based browser found; falling back to the default browser")

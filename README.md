@@ -78,6 +78,10 @@ lives in one), no extensions, and no entanglement with your browsing session.
 `--class=webssh` plus `StartupWMClass` in the `.desktop` file makes the window
 group under the webssh icon rather than the browser's.
 
+`install.sh` lists every chromium-based browser it finds and lets you pick one;
+the choice is stored as `app_browser` and can be changed in Settings. Leave it
+empty to detect one at startup.
+
 Modes degrade instead of failing: a `webview` binary built without the tag falls
 back to an app window, and an app window with no chromium-based browser
 installed falls back to the default browser. Setting `browser_cmd` overrides the

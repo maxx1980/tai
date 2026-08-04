@@ -2,10 +2,11 @@
 # Builds webssh, asks how its interface should open, and registers it in the
 # Linux application menu.
 #
-#   ./install.sh                  ask interactively (default)
-#   ./install.sh --ui app         pick the mode up front, no questions
-#   ./install.sh --yes            take the best available mode, never prompt
-#   ./install.sh --run            start the server when done
+#   ./install.sh                       ask interactively (default)
+#   ./install.sh --ui app              pick the mode up front, no questions
+#   ./install.sh --app-browser PATH    pin which browser hosts the app window
+#   ./install.sh --yes                 take the best available mode, never prompt
+#   ./install.sh --run                 start the server when done
 #
 # Modes: browser (a tab in your default browser), app (chromeless chromium
 #        window with its own profile), webview (native window built into the
@@ -20,6 +21,7 @@ WEBVIEW_PKGS="libgtk-3-dev libwebkit2gtk-4.0-dev"
 run_after=0
 assume_yes=0
 mode=""
+app_browser=""
 
 while (($#)); do
 	case "$1" in
@@ -34,8 +36,17 @@ while (($#)); do
 		shift
 		;;
 	--ui=*) mode=${1#--ui=} ;;
+	--app-browser)
+		[[ $# -ge 2 ]] || {
+			echo "install.sh: --app-browser needs a path" >&2
+			exit 2
+		}
+		app_browser=$2
+		shift
+		;;
+	--app-browser=*) app_browser=${1#--app-browser=} ;;
 	-h | --help)
-		sed -n '2,12p' "${BASH_SOURCE[0]}" | cut -c3-
+		sed -n '2,13p' "${BASH_SOURCE[0]}" | cut -c3-
 		exit 0
 		;;
 	*)
@@ -54,6 +65,11 @@ case "${mode:-}" in
 	;;
 esac
 
+if [[ -n $app_browser && ! -x $app_browser ]]; then
+	echo "install.sh: --app-browser '$app_browser' is not an executable file" >&2
+	exit 2
+fi
+
 # --- required tools ---------------------------------------------------------
 missing=()
 for tool in go npm rsvg-convert make; do
@@ -68,78 +84,127 @@ if ((${#missing[@]})); then
 fi
 
 # --- what this machine can actually do --------------------------------------
-# Mirrors chromiumNames/chromiumPaths in internal/appwin/chromium.go: only
-# chromium-family browsers support the --app window.
-find_chromium() {
-	local c
+# Mirrors FindChromiumAll in internal/appwin/chromium.go: only chromium-family
+# browsers support the --app window, and PATH entries are usually symlinks to
+# the copy under /opt, so the list is deduplicated by real path.
+find_chromium_all() {
+	local c real
+	declare -A seen=()
 	for c in google-chrome google-chrome-stable chromium chromium-browser \
 		brave-browser microsoft-edge vivaldi-stable thorium-browser; do
-		if command -v "$c" >/dev/null 2>&1; then
-			command -v "$c"
-			return 0
-		fi
+		c=$(command -v "$c" 2>/dev/null) || continue
+		real=$(readlink -f "$c" 2>/dev/null || echo "$c")
+		[[ -n ${seen[$real]:-} ]] && continue
+		seen[$real]=1
+		echo "$c"
 	done
 	for c in /opt/google/chrome/google-chrome /opt/microsoft/msedge/microsoft-edge \
 		/opt/brave.com/brave/brave-browser /opt/vivaldi/vivaldi; do
-		if [[ -x $c ]]; then
-			echo "$c"
-			return 0
-		fi
+		[[ -x $c ]] || continue
+		real=$(readlink -f "$c" 2>/dev/null || echo "$c")
+		[[ -n ${seen[$real]:-} ]] && continue
+		seen[$real]=1
+		echo "$c"
 	done
-	return 1
 }
 
-chromium=$(find_chromium || true)
+mapfile -t browsers < <(find_chromium_all)
 webkit_ready=0
 pkg-config --exists gtk+-3.0 webkit2gtk-4.0 2>/dev/null && webkit_ready=1
 
-# --- choose the mode --------------------------------------------------------
+# --- interactive selection --------------------------------------------------
+# Sets the globals $mode and $app_browser, so it must not run in a subshell.
+print_menu() {
+	echo
+	echo "How should webssh open its interface?"
+	echo
+	echo "  1) Default browser   a normal tab, the way it works today"
+	if ((${#browsers[@]})); then
+		echo "  2) App window        separate window, no tabs or address bar  [recommended]"
+		echo "                       ${#browsers[@]} usable browser(s) found"
+	else
+		echo "  2) App window        no chromium-based browser found"
+	fi
+	if ((webkit_ready)); then
+		echo "  3) Native webview    built into the binary, no browser at all"
+	else
+		echo "  3) Native webview    needs: sudo apt install $WEBVIEW_PKGS"
+	fi
+	echo
+}
+
+# choose_browser asks which browser hosts the app window. Returns 1 when the
+# user backs out, so the caller can redisplay the main menu.
+choose_browser() {
+	local i reply
+	echo
+	echo "Which browser should host the app window?"
+	echo
+	for i in "${!browsers[@]}"; do
+		printf '  %d) %s\n' $((i + 1)) "${browsers[i]}"
+	done
+	printf '  %d) Detect automatically at startup\n' $((${#browsers[@]} + 1))
+	echo "  0) Back"
+	echo
+	while :; do
+		read -r -p "Browser [1-$((${#browsers[@]} + 1)), default 1]: " reply || reply=""
+		reply=${reply:-1}
+		if [[ $reply == 0 ]]; then
+			return 1
+		fi
+		if [[ $reply =~ ^[0-9]+$ ]]; then
+			if ((reply >= 1 && reply <= ${#browsers[@]})); then
+				app_browser=${browsers[reply - 1]}
+				return 0
+			fi
+			if ((reply == ${#browsers[@]} + 1)); then
+				app_browser=auto
+				return 0
+			fi
+		fi
+		echo "  Enter a number from the list, or 0 to go back." >&2
+	done
+}
+
 choose_mode() {
 	# Non-interactive: an app window when one is possible, else a plain browser.
 	if ((assume_yes)) || [[ ! -t 0 ]]; then
-		[[ -n $chromium ]] && echo app || echo browser
+		if ((${#browsers[@]})); then
+			mode=app
+			[[ -n $app_browser ]] || app_browser=${browsers[0]}
+		else
+			mode=browser
+		fi
 		return
 	fi
 
-	{
-		echo
-		echo "How should webssh open its interface?"
-		echo
-		echo "  1) Default browser   a normal tab, the way it works today"
-		if [[ -n $chromium ]]; then
-			echo "  2) App window        separate window, no tabs or address bar  [recommended]"
-			echo "                       using: $chromium"
-		else
-			echo "  2) App window        UNAVAILABLE - no chromium-based browser found"
-		fi
-		if ((webkit_ready)); then
-			echo "  3) Native webview    built into the binary, no browser at all"
-		else
-			echo "  3) Native webview    needs: sudo apt install $WEBVIEW_PKGS"
-		fi
-		echo
-	} >&2
-
-	local default=1 reply
-	[[ -n $chromium ]] && default=2
+	local reply default=1
+	((${#browsers[@]})) && default=2
 	while :; do
-		read -r -p "Choice [1-3, default $default]: " reply >&2 || reply=""
+		print_menu
+		read -r -p "Choice [1-3, default $default]: " reply || reply=""
 		reply=${reply:-$default}
 		case "$reply" in
 		1)
-			echo browser
+			mode=browser
 			return
 			;;
 		2)
-			if [[ -z $chromium ]]; then
-				echo "  No chromium-based browser is installed; pick 1 or 3." >&2
-				continue
+			if ((${#browsers[@]} == 0)); then
+				echo
+				echo "  No chromium-based browser is installed, so the app window is not"
+				echo "  available. Install one (chromium, google-chrome, brave, edge, …)"
+				echo "  and re-run, or pick another option."
+				continue # back to the 1/2/3 menu
 			fi
-			echo app
-			return
+			# Backing out of the browser list returns to this menu.
+			if choose_browser; then
+				mode=app
+				return
+			fi
 			;;
 		3)
-			echo webview
+			mode=webview
 			return
 			;;
 		*) echo "  Enter 1, 2 or 3." >&2 ;;
@@ -147,7 +212,16 @@ choose_mode() {
 	done
 }
 
-[[ -n $mode ]] || mode=$(choose_mode)
+[[ -n $mode ]] || choose_mode
+
+# An explicitly requested app mode still needs a browser to drive it.
+if [[ $mode == app && ${#browsers[@]} -eq 0 && -z $app_browser ]]; then
+	echo "install.sh: --ui app needs a chromium-based browser, none found" >&2
+	exit 1
+fi
+if [[ $mode == app && -z $app_browser ]]; then
+	app_browser=${browsers[0]}
+fi
 
 # --- webview needs its headers before anything can be built -----------------
 if [[ $mode == webview ]] && ((!webkit_ready)); then
@@ -190,13 +264,17 @@ echo "==> installing desktop entry and icons"
 make install-desktop
 
 # Recorded in the database — the same place the Settings panel writes it, so
-# the launcher and the UI can never disagree about the mode.
+# the launcher and the UI can never disagree.
 echo "==> saving the interface mode"
-./webssh --set-ui-mode "$mode"
+if [[ $mode == app ]]; then
+	./webssh --set-ui-mode "$mode" --set-app-browser "$app_browser"
+else
+	./webssh --set-ui-mode "$mode"
+fi
 
 case "$mode" in
 browser) how="a tab in your default browser" ;;
-app) how="an app window via $chromium" ;;
+app) how="an app window via ${app_browser/#auto/a browser detected at startup}" ;;
 webview) how="a native webview window" ;;
 esac
 
@@ -208,9 +286,9 @@ webssh is installed.
   opens as $how
 
 It should now show up in the application menu; some desktops need a
-re-login before a newly added launcher appears. The mode can be changed
-later in Settings, or per run with '--ui browser|app|webview'.
-Remove everything again with './uninstall.sh'.
+re-login before a newly added launcher appears. The mode and the browser
+can be changed later in Settings, or per run with
+'--ui browser|app|webview'. Remove everything again with './uninstall.sh'.
 EOF
 
 if ((run_after)); then

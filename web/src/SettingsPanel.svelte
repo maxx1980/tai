@@ -256,6 +256,16 @@
       </span>
     </div>
     <div class="field">
+      <label for="appbrowser">App-window browser</label>
+      <input id="appbrowser" class="mono" bind:value={form.app_browser}
+        placeholder="empty = detect one at startup" />
+      <span class="muted" style="font-size:12px">
+        Path to the chromium-based browser hosting the app window, e.g.
+        <span class="mono">/usr/bin/chromium</span>. A path that no longer exists
+        falls back to detection.
+      </span>
+    </div>
+    <div class="field">
       <label for="browser">Browser command</label>
       <input id="browser" class="mono" bind:value={form.browser_cmd}
         placeholder="empty = use the mode above" />

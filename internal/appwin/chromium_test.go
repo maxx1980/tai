@@ -33,7 +33,7 @@ func TestFindChromiumOnPath(t *testing.T) {
 	t.Setenv("PATH", dir)
 	withCandidates(t, []string{"my-browser"}, nil)
 
-	got, ok := findChromium()
+	got, ok := findChromium("")
 	if !ok {
 		t.Fatal("expected to find my-browser on PATH")
 	}
@@ -50,7 +50,7 @@ func TestFindChromiumAbsolutePath(t *testing.T) {
 	t.Setenv("PATH", t.TempDir()) // nothing on PATH
 	withCandidates(t, []string{"definitely-not-installed"}, []string{exe})
 
-	got, ok := findChromium()
+	got, ok := findChromium("")
 	if !ok || got != exe {
 		t.Fatalf("findChromium() = %q, %v; want %q, true", got, ok, exe)
 	}
@@ -60,7 +60,7 @@ func TestFindChromiumNothingInstalled(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	withCandidates(t, []string{"definitely-not-installed"}, []string{"/nonexistent/browser"})
 
-	if got, ok := findChromium(); ok {
+	if got, ok := findChromium(""); ok {
 		t.Fatalf("findChromium() = %q, true; want not found", got)
 	}
 }
@@ -71,7 +71,7 @@ func TestFindChromiumIgnoresDirectories(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	withCandidates(t, []string{"definitely-not-installed"}, []string{dir})
 
-	if _, ok := findChromium(); ok {
+	if _, ok := findChromium(""); ok {
 		t.Fatal("a directory must not be accepted as a browser")
 	}
 }
@@ -80,7 +80,7 @@ func TestNewFallsBackToBrowserWithoutChromium(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	withCandidates(t, []string{"definitely-not-installed"}, nil)
 
-	if _, ok := New(ModeApp, config.Paths{}, "").(*browserUI); !ok {
+	if _, ok := New(ModeApp, config.Paths{}, "", "").(*browserUI); !ok {
 		t.Fatal("app mode without a chromium browser must fall back to browserUI")
 	}
 }
@@ -93,7 +93,7 @@ func TestNewBrowserCmdWins(t *testing.T) {
 	withCandidates(t, nil, []string{exe})
 
 	for _, mode := range Modes {
-		ui, ok := New(mode, config.Paths{}, "firefox {{url}}").(*browserUI)
+		ui, ok := New(mode, config.Paths{}, "firefox {{url}}", "").(*browserUI)
 		if !ok {
 			t.Fatalf("mode %q: browser_cmd must yield browserUI", mode)
 		}
@@ -108,7 +108,7 @@ func TestNewAppModeUsesChromium(t *testing.T) {
 	exe := fakeExe(t, dir, "edge")
 	withCandidates(t, nil, []string{exe})
 
-	ui, ok := New(ModeApp, config.Paths{BrowserDir: "/tmp/profile"}, "").(*chromiumUI)
+	ui, ok := New(ModeApp, config.Paths{BrowserDir: "/tmp/profile"}, "", "").(*chromiumUI)
 	if !ok {
 		t.Fatal("app mode with a chromium browser must yield chromiumUI")
 	}
@@ -124,7 +124,7 @@ func TestWebviewModeDegradesWhenNotBuiltIn(t *testing.T) {
 	exe := fakeExe(t, dir, "edge")
 	withCandidates(t, nil, []string{exe})
 
-	switch New(ModeWebview, config.Paths{}, "").(type) {
+	switch New(ModeWebview, config.Paths{}, "", "").(type) {
 	case *chromiumUI, *browserUI: // either is a working fallback
 	default:
 		t.Fatal("webview mode must fall back to a usable UI")
@@ -152,5 +152,60 @@ func TestParseModeAndValid(t *testing.T) {
 		if Valid(bad) {
 			t.Errorf("Valid(%q) = true", bad)
 		}
+	}
+}
+
+// A pinned browser must win over detection, and a stale pin must not leave the
+// user without a window.
+func TestFindChromiumPinned(t *testing.T) {
+	dir := t.TempDir()
+	detected := fakeExe(t, dir, "detected")
+	pinned := fakeExe(t, dir, "pinned")
+	t.Setenv("PATH", t.TempDir())
+	withCandidates(t, nil, []string{detected})
+
+	if got, ok := findChromium(pinned); !ok || got != pinned {
+		t.Fatalf("findChromium(pinned) = %q, %v; want %q", got, ok, pinned)
+	}
+	if got, ok := findChromium("/nonexistent/browser"); !ok || got != detected {
+		t.Fatalf("a stale pin must fall back to detection, got %q, %v", got, ok)
+	}
+}
+
+func TestNewAppModeHonoursPinnedBrowser(t *testing.T) {
+	dir := t.TempDir()
+	detected := fakeExe(t, dir, "detected")
+	pinned := fakeExe(t, dir, "pinned")
+	withCandidates(t, nil, []string{detected})
+
+	ui, ok := New(ModeApp, config.Paths{}, "", pinned).(*chromiumUI)
+	if !ok || ui.exe != pinned {
+		t.Fatalf("app mode must use the pinned browser, got %#v", ui)
+	}
+}
+
+// FindChromiumAll backs the installer's menu, so duplicates (a PATH symlink to
+// the same binary under /opt) would show up as bogus extra choices.
+func TestFindChromiumAllDeduplicates(t *testing.T) {
+	dir := t.TempDir()
+	real := fakeExe(t, dir, "edge-real")
+	link := filepath.Join(dir, "edge-link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", t.TempDir())
+	withCandidates(t, nil, []string{real, link})
+
+	if got := FindChromiumAll(); len(got) != 1 || got[0] != real {
+		t.Fatalf("FindChromiumAll() = %v; want just [%s]", got, real)
+	}
+}
+
+func TestFindChromiumAllEmpty(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	withCandidates(t, []string{"definitely-not-installed"}, []string{"/nonexistent"})
+
+	if got := FindChromiumAll(); len(got) != 0 {
+		t.Fatalf("FindChromiumAll() = %v; want empty", got)
 	}
 }

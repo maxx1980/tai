@@ -4,6 +4,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -35,10 +36,19 @@ func main() {
 	noOpen := flag.Bool("no-open", false, "do not open the interface automatically")
 	ui := flag.String("ui", "", "how to open the interface: browser|app|webview (default: the ui_mode setting)")
 	setUI := flag.String("set-ui-mode", "", "store browser|app|webview as the default and exit (used by install.sh)")
+	setAppBrowser := flag.String("set-app-browser", "", "store which browser the app window uses and exit (used by install.sh)")
+	listBrowsers := flag.Bool("list-app-browsers", false, "print the chromium-based browsers that can host an app window, and exit")
 	flag.Parse()
 
-	if *setUI != "" {
-		if err := storeUIMode(*setUI); err != nil {
+	if *listBrowsers {
+		for _, b := range appwin.FindChromiumAll() {
+			fmt.Println(b)
+		}
+		return
+	}
+
+	if *setUI != "" || *setAppBrowser != "" {
+		if err := storeSettings(*setUI, *setAppBrowser); err != nil {
 			log.Fatalf("webssh: %v", err)
 		}
 		return
@@ -57,11 +67,11 @@ func main() {
 	}
 }
 
-// storeUIMode persists the ui_mode setting without starting the server, so the
-// installer can record the user's choice in the same place the Settings panel
-// writes it.
-func storeUIMode(mode string) error {
-	if !appwin.Valid(mode) {
+// storeSettings persists the interface preferences without starting the server,
+// so the installer can record the user's choices in the same place the Settings
+// panel writes them. Either argument may be empty, meaning "leave alone".
+func storeSettings(mode, appBrowser string) error {
+	if mode != "" && !appwin.Valid(mode) {
 		return fmt.Errorf("--set-ui-mode %q is not one of browser|app|webview", mode)
 	}
 	paths, err := config.Resolve()
@@ -76,10 +86,23 @@ func storeUIMode(mode string) error {
 		return err
 	}
 	defer st.Close()
-	if err := st.SetSetting(config.KeyUIMode, mode); err != nil {
-		return err
+
+	if mode != "" {
+		if err := st.SetSetting(config.KeyUIMode, mode); err != nil {
+			return err
+		}
+		fmt.Printf("ui_mode = %s\n", mode)
 	}
-	fmt.Printf("ui_mode = %s\n", mode)
+	if appBrowser != "" {
+		// "auto" is how the installer says "go back to detecting one".
+		if appBrowser == "auto" {
+			appBrowser = ""
+		}
+		if err := st.SetSetting(config.KeyAppBrowser, appBrowser); err != nil {
+			return err
+		}
+		fmt.Printf("app_browser = %s\n", cmp.Or(appBrowser, "(auto-detect)"))
+	}
 	return nil
 }
 
@@ -148,7 +171,9 @@ func run(addr string, noOpen bool, uiFlag string) error {
 		if uiFlag != "" {
 			mode = appwin.ParseMode(uiFlag)
 		}
-		win := appwin.New(mode, paths, st.GetSetting(config.KeyBrowserCmd, ""))
+		win := appwin.New(mode, paths,
+			st.GetSetting(config.KeyBrowserCmd, ""),
+			st.GetSetting(config.KeyAppBrowser, ""))
 
 		if win.Blocking() {
 			// A webview owns this goroutine until its window closes, so the

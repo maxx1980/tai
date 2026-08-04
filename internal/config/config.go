@@ -27,6 +27,11 @@ const (
 	// (native window, only in a binary built with the webview tag).
 	KeyUIMode = "ui_mode"
 
+	// KeyAppBrowser pins which browser the app window uses. Empty (the default)
+	// means "detect one"; a path that no longer exists falls back to detection
+	// rather than leaving the user with no window.
+	KeyAppBrowser = "app_browser"
+
 	// KeyMasterPassword stores the argon2id hash of the master password. It is
 	// reserved: never returned to the SPA nor writable via PUT /api/settings.
 	KeyMasterPassword = "master_pw"
@@ -46,6 +51,7 @@ func Defaults(home string) map[string]string {
 		KeyAuthDisabled: "",
 		KeyExitOnClose:  "1",
 		KeyUIMode:       "app",
+		KeyAppBrowser:   "",
 	}
 }
 

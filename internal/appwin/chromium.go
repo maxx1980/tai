@@ -1,8 +1,10 @@
 package appwin
 
 import (
+	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 )
 
 // chromiumNames are tried on PATH, most-preferred first.
@@ -26,19 +28,59 @@ var chromiumPaths = []string{
 	"/opt/vivaldi/vivaldi",
 }
 
-// findChromium locates a chromium-family browser, which is what --app requires.
-// Firefox is deliberately absent: it dropped -app years ago and has no
-// equivalent chromeless window.
-func findChromium() (string, bool) {
+// isExecutableFile reports whether p is a runnable file (not a directory).
+func isExecutableFile(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && !st.IsDir() && st.Mode()&0o111 != 0
+}
+
+// FindChromiumAll returns every chromium-family browser on this machine, in
+// preference order and deduplicated by real path — /usr/bin/microsoft-edge is
+// typically a symlink to the copy under /opt, and offering both would be noise.
+// Exported so the installer can present the same list the daemon would use.
+func FindChromiumAll() []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(p string) {
+		real, err := filepath.EvalSymlinks(p)
+		if err != nil {
+			real = p
+		}
+		if seen[real] {
+			return
+		}
+		seen[real] = true
+		out = append(out, p)
+	}
 	for _, n := range chromiumNames {
 		if p, err := exec.LookPath(n); err == nil {
-			return p, true
+			add(p)
 		}
 	}
 	for _, p := range chromiumPaths {
-		if st, err := os.Stat(p); err == nil && !st.IsDir() && st.Mode()&0o111 != 0 {
+		if isExecutableFile(p) {
+			add(p)
+		}
+	}
+	return out
+}
+
+// findChromium picks the browser to drive the app window: the pinned one when
+// it is still usable, otherwise the first one detected. Firefox is deliberately
+// absent from the lists — it dropped -app years ago and has no equivalent
+// chromeless window.
+func findChromium(pinned string) (string, bool) {
+	if pinned != "" {
+		if isExecutableFile(pinned) {
+			return pinned, true
+		}
+		if p, err := exec.LookPath(pinned); err == nil {
 			return p, true
 		}
+		log.Printf("configured app browser %q is not executable; detecting one instead", pinned)
+	}
+	if all := FindChromiumAll(); len(all) > 0 {
+		return all[0], true
 	}
 	return "", false
 }
