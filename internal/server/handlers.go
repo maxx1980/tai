@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"webssh/internal/appwin"
 	"webssh/internal/askpass"
 	"webssh/internal/config"
 	"webssh/internal/keys"
@@ -722,10 +723,10 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleRestart re-executes the daemon in place: it replies, then replaces the
-// process image with a fresh copy (same PID, same args). The listening socket is
-// close-on-exec so the port frees up and the new image rebinds (SO_REUSEADDR) and
-// reopens the browser per browser_cmd. Active connections drop for ~0.5s. Unix
-// only, which matches the rest of the app (pty, xdg-open).
+// process image with a fresh copy (same PID). The listening socket is
+// close-on-exec so the port frees up and the new image rebinds (SO_REUSEADDR).
+// Active connections drop for ~0.5s. Unix only, which matches the rest of the
+// app (pty, xdg-open).
 func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"restarting": true})
 	if f, ok := w.(http.Flusher); ok {
@@ -738,8 +739,26 @@ func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 			log.Printf("restart: cannot resolve executable: %v", err)
 			return
 		}
-		if err := syscall.Exec(exe, os.Args, os.Environ()); err != nil {
+		if err := syscall.Exec(exe, s.restartArgs(), os.Environ()); err != nil {
 			log.Printf("restart: exec failed: %v", err)
 		}
 	}()
+}
+
+// restartArgs adjusts argv for the re-exec. A browser or app window is a
+// separate process: it survives the restart and its presence socket reconnects
+// on its own, so opening the interface again would just leave a stray second
+// window. A webview, by contrast, dies with the process image and must be
+// recreated — otherwise the restart would leave the user with no interface.
+func (s *Server) restartArgs() []string {
+	args := os.Args
+	if appwin.ParseMode(s.st.GetSetting(config.KeyUIMode, "")) == appwin.ModeWebview {
+		return args
+	}
+	for _, a := range args {
+		if a == "--no-open" || a == "-no-open" {
+			return args
+		}
+	}
+	return append(append([]string{}, args...), "--no-open")
 }

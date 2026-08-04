@@ -242,12 +242,26 @@
       <input id="files" class="mono" bind:value={form.files_cmd} />
     </div>
     <div class="field">
+      <label for="uimode">Open the interface as</label>
+      <select id="uimode" bind:value={form.ui_mode}>
+        <option value="app">App window (no tabs or address bar)</option>
+        <option value="browser">A tab in your default browser</option>
+        <option value="webview">Native window (webview build only)</option>
+      </select>
+      <span class="muted" style="font-size:12px">
+        The app window runs a chromium-based browser with its own private
+        profile, so it keeps out of your normal browsing session. Falls back to
+        the default browser when no suitable browser is installed. Takes effect
+        the next time webssh starts.
+      </span>
+    </div>
+    <div class="field">
       <label for="browser">Browser command</label>
       <input id="browser" class="mono" bind:value={form.browser_cmd}
-        placeholder="empty = system default (xdg-open)" />
+        placeholder="empty = use the mode above" />
       <span class="muted" style="font-size:12px">
         e.g. <span class="mono">firefox</span> or <span class="mono">chromium --new-window {"{{url}}"}</span>.
-        Used when webssh opens on startup.
+        Overrides the mode above when set.
       </span>
     </div>
     <div class="field">

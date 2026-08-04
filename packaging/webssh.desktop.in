@@ -9,3 +9,6 @@ Terminal=false
 Categories=Network;RemoteAccess;
 Keywords=ssh;sftp;terminal;remote;
 StartupNotify=true
+# Groups the chromium --app window (launched with --class=webssh) under this
+# entry's icon instead of the browser's.
+StartupWMClass=webssh

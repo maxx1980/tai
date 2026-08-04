@@ -60,7 +60,36 @@ go build -o webssh ./cmd/webssh
 ./webssh                 # prints http://127.0.0.1:8022/?token=…
 ```
 
-Flags: `--addr 127.0.0.1:8022`, `--no-open`.
+Flags: `--addr 127.0.0.1:8022`, `--no-open`, `--ui browser|app|webview`.
+
+## How the interface opens
+
+Three modes, picked during install and changeable later in Settings:
+
+| Mode | What you get | Needs |
+|---|---|---|
+| `app` (default) | a chromeless window — no tabs, no address bar, its own taskbar icon | any chromium-based browser |
+| `browser` | a normal tab in your default browser | nothing |
+| `webview` | a native GTK window inside the binary, no browser at all | a build with `make build-webview` |
+
+The app window runs the browser with `--user-data-dir` pointing into
+`~/.local/share/webssh/browser`, so it has its own cookie jar (the auth token
+lives in one), no extensions, and no entanglement with your browsing session.
+`--class=webssh` plus `StartupWMClass` in the `.desktop` file makes the window
+group under the webssh icon rather than the browser's.
+
+Modes degrade instead of failing: a `webview` binary built without the tag falls
+back to an app window, and an app window with no chromium-based browser
+installed falls back to the default browser. Setting `browser_cmd` overrides the
+mode entirely.
+
+Together with "quits with the browser" above, the app window makes webssh behave
+like an ordinary desktop application: close the window and the daemon stops.
+
+The webview build additionally needs GTK and WebKit headers
+(Debian/Deepin: `sudo apt install libgtk-3-dev libwebkit2gtk-4.0-dev`), which is
+why it is opt-in — it turns on cgo, whereas the default build is pure Go and
+cross-compiles to Windows unchanged.
 
 ## Install (Linux desktop)
 
@@ -69,9 +98,13 @@ Flags: `--addr 127.0.0.1:8022`, `--no-open`.
 ```sh
 git clone https://github.com/maxx1980/tai
 cd tai
-./install.sh          # deps if needed + build + desktop entry
-./install.sh --run    # ...and start the server afterwards
+./install.sh              # asks how the interface should open, then builds
+./install.sh --ui app     # skip the question
+./install.sh --run        # ...and start the server afterwards
 ```
+
+It asks which of the three modes above to use, marking any that this machine
+cannot provide, and records the answer where the Settings panel reads it.
 
 It installs into your home directory only — no root, no system paths:
 

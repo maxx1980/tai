@@ -1,4 +1,4 @@
-.PHONY: all ui build run clean deps dev icons syso build-windows install-desktop uninstall-desktop
+.PHONY: all ui build build-webview run clean deps dev icons syso build-windows install-desktop uninstall-desktop
 
 BINARY := webssh
 # go-winres declares an older go directive, so `go run pkg@ver` would fall back to
@@ -23,6 +23,12 @@ ui: icons
 # build compiles the SPA then the Go binary (which embeds web/dist).
 build: ui
 	go build -o $(BINARY) ./cmd/webssh
+
+# build-webview links the embedded webkit2gtk window into the binary. It needs
+# cgo and the webkit headers (Debian/Deepin: libgtk-3-dev libwebkit2gtk-4.0-dev),
+# which is why it is not the default build.
+build-webview: ui
+	go build -tags webview -o $(BINARY) ./cmd/webssh
 
 # syso builds the Windows resource object; the Go linker picks up any *.syso
 # next to package main automatically when GOOS=windows.

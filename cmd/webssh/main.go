@@ -14,7 +14,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
@@ -24,24 +23,67 @@ import (
 
 	webassets "webssh/web"
 
+	"webssh/internal/appwin"
 	"webssh/internal/config"
 	"webssh/internal/health"
-	"webssh/internal/launcher"
 	"webssh/internal/server"
 	"webssh/internal/store"
 )
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8022", "listen address (must be loopback)")
-	noOpen := flag.Bool("no-open", false, "do not open the browser automatically")
+	noOpen := flag.Bool("no-open", false, "do not open the interface automatically")
+	ui := flag.String("ui", "", "how to open the interface: browser|app|webview (default: the ui_mode setting)")
+	setUI := flag.String("set-ui-mode", "", "store browser|app|webview as the default and exit (used by install.sh)")
 	flag.Parse()
 
-	if err := run(*addr, *noOpen); err != nil {
+	if *setUI != "" {
+		if err := storeUIMode(*setUI); err != nil {
+			log.Fatalf("webssh: %v", err)
+		}
+		return
+	}
+
+	if *ui != "" && !appwin.Valid(*ui) {
+		log.Fatalf("webssh: --ui %q is not one of browser|app|webview", *ui)
+	}
+
+	// GTK requires its window to live on the process's main thread, so the
+	// webview mode needs main's goroutine pinned. Harmless for the others.
+	runtime.LockOSThread()
+
+	if err := run(*addr, *noOpen, *ui); err != nil {
 		log.Fatalf("webssh: %v", err)
 	}
 }
 
-func run(addr string, noOpen bool) error {
+// storeUIMode persists the ui_mode setting without starting the server, so the
+// installer can record the user's choice in the same place the Settings panel
+// writes it.
+func storeUIMode(mode string) error {
+	if !appwin.Valid(mode) {
+		return fmt.Errorf("--set-ui-mode %q is not one of browser|app|webview", mode)
+	}
+	paths, err := config.Resolve()
+	if err != nil {
+		return err
+	}
+	if err := paths.EnsureDirs(); err != nil {
+		return err
+	}
+	st, err := store.Open(paths.DBPath)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	if err := st.SetSetting(config.KeyUIMode, mode); err != nil {
+		return err
+	}
+	fmt.Printf("ui_mode = %s\n", mode)
+	return nil
+}
+
+func run(addr string, noOpen bool, uiFlag string) error {
 	if err := ensureLoopback(addr); err != nil {
 		return err
 	}
@@ -88,18 +130,42 @@ func run(addr string, noOpen bool) error {
 		}
 	}()
 
-	if !noOpen {
-		openBrowser(url, st.GetSetting(config.KeyBrowserCmd, ""))
-	}
-
-	// Graceful shutdown on SIGINT/SIGTERM, or when the last browser tab closes
-	// (see internal/server/presence.go).
+	// Shutdown is requested by SIGINT/SIGTERM or by the last tab closing (see
+	// internal/server/presence.go).
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	select {
-	case <-stop:
-	case <-srv.Quit():
+	waitForStop := func() {
+		select {
+		case <-stop:
+		case <-srv.Quit():
+		}
 	}
+
+	if noOpen {
+		waitForStop()
+	} else {
+		mode := appwin.ParseMode(st.GetSetting(config.KeyUIMode, ""))
+		if uiFlag != "" {
+			mode = appwin.ParseMode(uiFlag)
+		}
+		win := appwin.New(mode, paths, st.GetSetting(config.KeyBrowserCmd, ""))
+
+		if win.Blocking() {
+			// A webview owns this goroutine until its window closes, so the
+			// shutdown signal has to arrive from the side and close it.
+			go func() { waitForStop(); win.Close() }()
+			if err := win.Open(url); err != nil {
+				log.Printf("could not open the window (%v); open the URL above manually", err)
+				waitForStop()
+			}
+		} else {
+			if err := win.Open(url); err != nil {
+				log.Printf("could not open the interface (%v); open the URL above manually", err)
+			}
+			waitForStop()
+		}
+	}
+
 	fmt.Println("\nshutting down…")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -149,41 +215,4 @@ func loadOrCreateAPIKey(dataDir string) (string, error) {
 		return "", err
 	}
 	return k, nil
-}
-
-// openBrowser opens rawURL. When browserCmd is set it is used (with {{url}}
-// substituted, or the URL appended when the placeholder is absent); otherwise
-// the platform default handler is used.
-func openBrowser(rawURL, browserCmd string) {
-	var name string
-	var args []string
-
-	if strings.TrimSpace(browserCmd) != "" {
-		hasPlaceholder := strings.Contains(browserCmd, "{{url}}")
-		tmpl := strings.ReplaceAll(browserCmd, "{{url}}", rawURL)
-		if fields, err := launcher.SplitFields(tmpl); err != nil || len(fields) == 0 {
-			log.Printf("invalid browser command %q (%v); using system default", browserCmd, err)
-		} else {
-			name, args = fields[0], fields[1:]
-			if !hasPlaceholder {
-				args = append(args, rawURL)
-			}
-		}
-	}
-
-	if name == "" {
-		switch runtime.GOOS {
-		case "darwin":
-			name = "open"
-		case "windows":
-			name, args = "rundll32", []string{"url.dll,FileProtocolHandler"}
-		default:
-			name = "xdg-open"
-		}
-		args = append(args, rawURL)
-	}
-
-	if err := exec.Command(name, args...).Start(); err != nil {
-		log.Printf("could not open browser (%v); open the URL above manually", err)
-	}
 }

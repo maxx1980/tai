@@ -22,6 +22,11 @@ const (
 	// the last browser tab goes away, so it does not linger in the background.
 	KeyExitOnClose = "exit_on_close"
 
+	// KeyUIMode selects how the interface is opened: "browser" (system default
+	// handler), "app" (chromeless chromium window, the default) or "webview"
+	// (native window, only in a binary built with the webview tag).
+	KeyUIMode = "ui_mode"
+
 	// KeyMasterPassword stores the argon2id hash of the master password. It is
 	// reserved: never returned to the SPA nor writable via PUT /api/settings.
 	KeyMasterPassword = "master_pw"
@@ -40,6 +45,7 @@ func Defaults(home string) map[string]string {
 		KeyTheme:        "system",
 		KeyAuthDisabled: "",
 		KeyExitOnClose:  "1",
+		KeyUIMode:       "app",
 	}
 }
 
@@ -48,6 +54,7 @@ type Paths struct {
 	Home          string // user home dir
 	DataDir       string // ~/.local/share/webssh
 	DBPath        string // <DataDir>/webssh.db
+	BrowserDir    string // <DataDir>/browser — private profile for the app window
 	SSHDir        string // ~/.ssh
 	SSHConfig     string // ~/.ssh/config
 	ManagedConfig string // ~/.ssh/config.d/inventory
@@ -65,6 +72,7 @@ func Resolve() (Paths, error) {
 		Home:          home,
 		DataDir:       dataDir,
 		DBPath:        filepath.Join(dataDir, "webssh.db"),
+		BrowserDir:    filepath.Join(dataDir, "browser"),
 		SSHDir:        sshDir,
 		SSHConfig:     filepath.Join(sshDir, "config"),
 		ManagedConfig: filepath.Join(sshDir, "config.d", "inventory"),
