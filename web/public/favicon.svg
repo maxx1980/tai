@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>webssh</title>
+
+  <!-- accent background (same blue as the accent colour in web/src/app.css) -->
+  <rect width="512" height="512" rx="112" fill="#2f6fed"/>
+
+  <!-- terminal prompt: >_ -->
+  <g fill="none" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M128 190 L232 276 L128 362" stroke-width="46"/>
+    <path d="M288 344 H392" stroke-width="42"/>
+  </g>
+
+  <!-- lock badge, top right; the ring is background-coloured to punch a gap -->
+  <circle cx="388" cy="124" r="98" fill="#2f6fed"/>
+  <circle cx="388" cy="124" r="84" fill="#ffffff"/>
+  <path d="M367 112 V100 A21 21 0 0 1 409 100 V112"
+        fill="none" stroke="#2f6fed" stroke-width="17" stroke-linecap="round"/>
+  <rect x="349" y="109" width="78" height="62" rx="12" fill="#2f6fed"/>
+</svg>

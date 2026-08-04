@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=webssh
+GenericName=SSH control panel
+Comment=Local SSH control panel with terminal, key and mount management
+Exec=@EXEC@
+Icon=webssh
+Terminal=false
+Categories=Network;RemoteAccess;
+Keywords=ssh;sftp;terminal;remote;
+StartupNotify=true

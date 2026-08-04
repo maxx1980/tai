@@ -1,5 +1,10 @@
 # Go binary
 /webssh
+/webssh.exe
+
+# Generated icon artefacts (rebuild with `make icons` / `make syso`)
+assets/png/
+cmd/webssh/*.syso
 
 # Frontend
 web/node_modules/
