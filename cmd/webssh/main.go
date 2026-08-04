@@ -92,10 +92,14 @@ func run(addr string, noOpen bool) error {
 		openBrowser(url, st.GetSetting(config.KeyBrowserCmd, ""))
 	}
 
-	// Graceful shutdown on SIGINT/SIGTERM.
+	// Graceful shutdown on SIGINT/SIGTERM, or when the last browser tab closes
+	// (see internal/server/presence.go).
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	<-stop
+	select {
+	case <-stop:
+	case <-srv.Quit():
+	}
 	fmt.Println("\nshutting down…")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

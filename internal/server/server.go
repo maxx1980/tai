@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"webssh/internal/config"
 	"webssh/internal/health"
@@ -43,7 +44,20 @@ type Server struct {
 
 	mu       sync.Mutex          // guards sessions
 	sessions map[string]struct{} // valid unlock-session cookie values
+
+	// Presence: open /api/presence websockets, one per browser tab. When the
+	// last one goes away the daemon exits (see exit_on_close).
+	clients  atomic.Int64
+	graceMu  sync.Mutex
+	graceT   *time.Timer
+	quit     chan struct{}
+	quitOnce sync.Once
 }
+
+// exitGrace is how long the daemon waits after the last tab disconnects before
+// giving up. It must comfortably outlast a page reload, which drops the socket
+// and reopens it a moment later.
+const exitGrace = 8 * time.Second
 
 // sessionCookie is the name of the cookie proving the master-password gate has
 // been unlocked (separate from the loopback startup token).
@@ -60,6 +74,7 @@ func New(st *store.Store, paths config.Paths, token string, assets fs.FS, hc *he
 		health:   hc,
 		mux:      http.NewServeMux(),
 		sessions: map[string]struct{}{},
+		quit:     make(chan struct{}),
 	}
 	s.authDisabled.Store(st.GetSetting(config.KeyAuthDisabled, "") == "1")
 	s.routes()
@@ -211,8 +226,9 @@ func (s *Server) routes() {
 
 	api("PUT /api/settings", s.handleUpdateSettings)
 
-	// Websocket terminal (token via query param).
+	// Websockets (token via query param — browsers can't set headers on WS).
 	s.mux.HandleFunc("/api/terminal/{id}", s.handleTerminal)
+	s.mux.HandleFunc("/api/presence", s.handlePresence)
 }
 
 // ---- middleware ----

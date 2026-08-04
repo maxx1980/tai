@@ -18,6 +18,10 @@ const (
 	// loopback bind and Origin check on mutations still apply.
 	KeyAuthDisabled = "auth_disabled"
 
+	// KeyExitOnClose ("1" = on, the default) shuts the daemon down shortly after
+	// the last browser tab goes away, so it does not linger in the background.
+	KeyExitOnClose = "exit_on_close"
+
 	// KeyMasterPassword stores the argon2id hash of the master password. It is
 	// reserved: never returned to the SPA nor writable via PUT /api/settings.
 	KeyMasterPassword = "master_pw"
@@ -35,6 +39,7 @@ func Defaults(home string) map[string]string {
 		KeyMountBaseDir: filepath.Join(home, "mnt", "webssh"),
 		KeyTheme:        "system",
 		KeyAuthDisabled: "",
+		KeyExitOnClose:  "1",
 	}
 }
 

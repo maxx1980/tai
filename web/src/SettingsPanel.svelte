@@ -139,6 +139,21 @@
     }
   }
 
+  // Toggle "quit when the last tab closes". Takes effect immediately — the
+  // daemon re-reads the setting when its grace timer fires.
+  async function applyExitOnClose(enabled: boolean) {
+    busy = true;
+    try {
+      await api.put("/api/settings", { exit_on_close: enabled ? "1" : "0" });
+      await refresh();
+      notify("success", enabled ? "Will quit when the last tab closes" : "Will keep running in the background");
+    } catch (e) {
+      notify("error", String(e));
+    } finally {
+      busy = false;
+    }
+  }
+
   // Toggle the API-token requirement. Disabling is gated by a warning modal
   // (see the "disableauth" modal); re-enabling is immediate.
   async function applyAuthDisabled(disabled: boolean) {
@@ -311,6 +326,20 @@
         Set a master password to enable backup and reset.
       </p>
     {/if}
+
+    <hr />
+
+    <label class="pick">
+      <input type="checkbox" style="width:auto" disabled={busy}
+        checked={app.settings.exit_on_close !== "0"}
+        onchange={(e) => applyExitOnClose(e.currentTarget.checked)} />
+      <span>Quit when the last tab is closed</span>
+    </label>
+    <p class="muted">
+      The daemon exits a few seconds after you close the last webssh tab, so it
+      does not linger in the background. Reloading the page does not count.
+      Turn this off to keep it running — then stop it from the terminal.
+    </p>
 
     <hr />
 

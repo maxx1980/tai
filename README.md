@@ -20,6 +20,10 @@ browser-based terminal is included as a fallback for remote use.
   rename, delete, in the browser (agent/key auth, or a one-shot web password prompt).
 - **Native launch** — configurable commands to open your terminal / file manager.
 - **Web terminal** — xterm.js session over a websocket (fallback to native apps).
+- **Quits with the browser** — each tab holds a presence websocket, and the
+  daemon exits a few seconds after the last one closes, so it does not linger in
+  the background. Reloading does not count; turn it off in Settings to keep it
+  running.
 
 ## Security
 

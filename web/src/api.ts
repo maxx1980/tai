@@ -181,6 +181,12 @@ export function terminalURL(hostId: number): string {
   return `${proto}://${location.host}/api/terminal/${hostId}?token=${encodeURIComponent(token())}`;
 }
 
+// presenceURL builds the websocket URL that tells the daemon this tab is open.
+export function presenceURL(): string {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  return `${proto}://${location.host}/api/presence?token=${encodeURIComponent(token())}`;
+}
+
 // ---- SFTP browser ----
 
 export interface SftpEntry {
