@@ -26,17 +26,59 @@ type GenParams struct {
 	Comment    string
 }
 
+// ValidName rejects key names that would resolve outside keysDir. Callers that
+// touch the filesystem by name (stat, remove) must run this *before* joining the
+// name onto a path, not after.
+func ValidName(name string) error {
+	if name == "" {
+		return fmt.Errorf("key name required")
+	}
+	if name == "." || name == ".." || strings.ContainsAny(name, "/\\") {
+		return fmt.Errorf("invalid key name")
+	}
+	return nil
+}
+
+// RemoveFiles deletes a managed key's private and public files and reports how
+// many were removed. It refuses to touch anything outside keysDir, so a
+// hand-edited private_path in the database can never make webssh unlink an
+// arbitrary file (one in ~/.ssh, say). A missing file is not an error.
+func RemoveFiles(keysDir string, k store.Key) (int, error) {
+	if k.PrivatePath == "" {
+		return 0, fmt.Errorf("key has no file on disk")
+	}
+	dir, err := filepath.Abs(keysDir)
+	if err != nil {
+		return 0, err
+	}
+	priv, err := filepath.Abs(k.PrivatePath)
+	if err != nil {
+		return 0, err
+	}
+	if filepath.Dir(priv) != dir {
+		return 0, fmt.Errorf("key file %s is outside the managed directory", k.PrivatePath)
+	}
+	n := 0
+	for _, p := range []string{priv, priv + ".pub"} {
+		switch err := os.Remove(p); {
+		case err == nil:
+			n++
+		case os.IsNotExist(err):
+		default:
+			return n, err
+		}
+	}
+	return n, nil
+}
+
 // Generate runs ssh-keygen to create a keypair under keysDir and returns a
 // populated store.Key (not yet persisted).
 func Generate(keysDir string, p GenParams) (store.Key, error) {
 	if p.Type == "" {
 		p.Type = "ed25519"
 	}
-	if p.Name == "" {
-		return store.Key{}, fmt.Errorf("key name required")
-	}
-	if strings.ContainsAny(p.Name, "/\\") {
-		return store.Key{}, fmt.Errorf("invalid key name")
+	if err := ValidName(p.Name); err != nil {
+		return store.Key{}, err
 	}
 	if err := os.MkdirAll(keysDir, 0o700); err != nil {
 		return store.Key{}, err
@@ -81,11 +123,8 @@ type ImportParams struct {
 // derives the public key from the private one when PublicData is empty. Callers
 // are responsible for the overwrite decision before calling.
 func Import(keysDir string, p ImportParams) (store.Key, error) {
-	if p.Name == "" {
-		return store.Key{}, fmt.Errorf("key name required")
-	}
-	if strings.ContainsAny(p.Name, "/\\") {
-		return store.Key{}, fmt.Errorf("invalid key name")
+	if err := ValidName(p.Name); err != nil {
+		return store.Key{}, err
 	}
 	if len(p.PrivateData) == 0 {
 		return store.Key{}, fmt.Errorf("private key is empty")

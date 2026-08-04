@@ -96,8 +96,10 @@ export function importKey(
   });
 }
 
-// exportKey downloads a key's public or private file.
-export async function exportKey(id: number, kind: "public" | "private"): Promise<void> {
+// exportKey downloads a key's public or private file and returns the filename
+// it was saved under, so the caller can say so — the app window has no download
+// bar, and a silent save looks like a dead button.
+export async function exportKey(id: number, kind: "public" | "private"): Promise<string> {
   const res = await netFetch(`/api/keys/${id}/export?kind=${kind}`, {
     headers: { "X-Auth-Token": token() },
   });
@@ -117,6 +119,7 @@ export async function exportKey(id: number, kind: "public" | "private"): Promise
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+  return name;
 }
 
 // ---- Master password / unlock gate + backup ----

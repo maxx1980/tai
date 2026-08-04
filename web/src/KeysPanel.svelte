@@ -5,6 +5,7 @@
 
   let genOpen = $state(false);
   let gen = $state({ name: "", type: "ed25519", passphrase: "", comment: "" });
+  let genConflict = $state<{ orphan: boolean } | null>(null);
   let busy = $state(false);
 
   // Import state.
@@ -71,7 +72,15 @@
 
   async function exportOne(k: Key, kind: "public" | "private") {
     try {
-      await exportKey(k.id, kind);
+      const name = await exportKey(k.id, kind);
+      // The app window has no download bar, so without this the click looks
+      // like it did nothing. Downloaded files are also world-readable.
+      notify(
+        "success",
+        kind === "private"
+          ? `Saved ${name} to your downloads folder — chmod 600 it, downloads are world-readable`
+          : `Saved ${name} to your downloads folder`,
+      );
     } catch (e) {
       notify("error", String(e));
     }
@@ -175,32 +184,56 @@
     busy = false;
   }
 
-  async function generate() {
+  async function generate(overwrite: boolean) {
     if (!gen.name.trim()) {
       notify("error", "Key name required");
       return;
     }
     busy = true;
     try {
-      await api.post("/api/keys/generate", gen);
+      await api.post("/api/keys/generate", { ...gen, overwrite });
       await refresh();
       notify("success", `Key ${gen.name} generated`);
       genOpen = false;
+      genConflict = null;
       gen = { name: "", type: "ed25519", passphrase: "", comment: "" };
     } catch (e) {
-      notify("error", String(e));
+      if (e instanceof ApiError && e.data?.exists) {
+        genConflict = { orphan: !!e.data.orphan }; // ask before replacing
+      } else {
+        notify("error", String(e));
+      }
     } finally {
       busy = false;
     }
   }
 
-  async function removeKey(k: Key) {
-    if (!confirm(`Forget key "${k.name}"? (files on disk are kept)`)) return;
+  // Deleting: the record always goes, the files only if asked. Leaving them
+  // behind keeps the name unusable for a new key, so the choice is explicit.
+  let delKey = $state<Key | null>(null);
+  let delFiles = $state(false);
+
+  function openDelete(k: Key) {
+    delKey = k;
+    delFiles = false;
+  }
+
+  async function doDelete() {
+    if (!delKey) return;
+    const k = delKey;
+    busy = true;
     try {
-      await api.del(`/api/keys/${k.id}`);
+      await api.del(`/api/keys/${k.id}${delFiles ? "?files=1" : ""}`);
       await refresh();
+      notify(
+        "success",
+        delFiles ? `Deleted key ${k.name} and its files` : `Forgot key ${k.name} (files kept on disk)`,
+      );
+      delKey = null;
     } catch (e) {
       notify("error", String(e));
+    } finally {
+      busy = false;
     }
   }
 
@@ -271,7 +304,7 @@
   <h2 style="margin:0;font-size:16px">SSH Keys</h2>
   <div class="spacer"></div>
   <button onclick={openImport}>Import key</button>
-  <button class="primary" onclick={() => (genOpen = true)}>Generate key</button>
+  <button class="primary" onclick={() => { genOpen = true; genConflict = null; }}>Generate key</button>
 </div>
 
 {#if app.keys.length === 0}
@@ -297,7 +330,7 @@
         {/if}
         <button class="sm" onclick={() => openDeploy(k)}>Deploy…</button>
         <button class="sm" onclick={() => openCred(k)} title="Save login/password and set this key for hosts">Set credentials…</button>
-        <button class="sm danger ghost" onclick={() => removeKey(k)}>Forget</button>
+        <button class="sm danger ghost" onclick={() => openDelete(k)}>Delete…</button>
       </div>
       <div class="mono pub" title={k.public_key}>{k.public_key}</div>
       <div class="muted" style="font-size:12px">
@@ -315,7 +348,8 @@
       <h2>Generate SSH key</h2>
       <div class="field">
         <label for="kname">Name *</label>
-        <input id="kname" bind:value={gen.name} placeholder="id_acme_prod" />
+        <input id="kname" bind:value={gen.name} placeholder="id_acme_prod"
+          oninput={() => (genConflict = null)} />
       </div>
       <div class="field">
         <label for="ktype">Type</label>
@@ -333,10 +367,64 @@
         <label for="kcomment">Comment</label>
         <input id="kcomment" bind:value={gen.comment} placeholder="me@laptop" />
       </div>
+      {#if genConflict}
+        <div class="warn">
+          {#if genConflict.orphan}
+            ⚠ Files for a key named <strong>{gen.name.trim()}</strong> are still on disk —
+            left behind when it was forgotten without deleting them. Generating will
+            <strong>replace</strong> those files.
+          {:else}
+            ⚠ A key named <strong>{gen.name.trim()}</strong> already exists. Generating will
+            <strong>replace</strong> its files and record. Continue?
+          {/if}
+        </div>
+      {/if}
+
       <div class="row">
         <div class="spacer"></div>
         <button onclick={() => (genOpen = false)}>Cancel</button>
-        <button class="primary" onclick={generate} disabled={busy}>Generate</button>
+        {#if genConflict}
+          <button class="danger" onclick={() => generate(true)} disabled={busy}>Overwrite</button>
+        {:else}
+          <button class="primary" onclick={() => generate(false)} disabled={busy}>Generate</button>
+        {/if}
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if delKey}
+  <div class="overlay" onclick={() => (delKey = null)}>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="modal" onclick={(e) => e.stopPropagation()}>
+      <h2>Delete key “{delKey.name}”</h2>
+      <p class="muted" style="margin-top:0">
+        The key is removed from webssh and from the list of keys deployed to hosts.
+        Already-deployed public keys stay on the remote hosts.
+      </p>
+      <label class="pick" style="padding:0">
+        <input type="checkbox" bind:checked={delFiles} style="width:auto" />
+        <span>Also delete the key files from disk</span>
+      </label>
+      <div class="muted mono" style="font-size:12px;padding-left:26px">
+        {delKey.private_path}<br />{delKey.private_path}.pub
+      </div>
+      {#if delFiles}
+        <div class="warn" style="margin-top:12px">
+          ⚠ The private key file is deleted for good. Download it first if you still need it.
+        </div>
+      {:else}
+        <p class="muted" style="font-size:12px">
+          Kept on disk, the files keep the name <span class="mono">{delKey.name}</span> taken
+          for new keys.
+        </p>
+      {/if}
+      <div class="row">
+        <div class="spacer"></div>
+        <button onclick={() => (delKey = null)}>Cancel</button>
+        <button class="danger" onclick={doDelete} disabled={busy}>
+          {delFiles ? "Delete key and files" : "Forget key"}
+        </button>
       </div>
     </div>
   </div>

@@ -325,24 +325,64 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 
 // ---- keys ----
 
+// handleGenerateKey creates a keypair. Like handleImportKey it answers a name
+// clash with 409 {exists:true} instead of a flat error, so the SPA can offer to
+// overwrite — which is the only way out when "Forget" left the files behind but
+// dropped the database row (409 marks that case with orphan:true).
 func (s *Server) handleGenerateKey(w http.ResponseWriter, r *http.Request) {
-	var p keys.GenParams
-	if err := readJSON(r, &p); err != nil {
+	var body struct {
+		keys.GenParams
+		Overwrite bool `json:"overwrite"`
+	}
+	if err := readJSON(r, &body); err != nil {
 		writeErr(w, 400, err)
 		return
 	}
-	keysDir := filepath.Join(s.paths.DataDir, "keys")
+	p := body.GenParams
+	p.Name = strings.TrimSpace(p.Name)
+	if err := keys.ValidName(p.Name); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+
+	keysDir := s.keysDir()
+	priv := filepath.Join(keysDir, p.Name)
+	existing, hasDB, _ := s.st.GetKeyByName(p.Name)
+	_, statErr := os.Stat(priv)
+	if hasDB || statErr == nil {
+		if !body.Overwrite {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"exists": true,
+				"orphan": !hasDB, // files left over from a forgotten key
+				"error":  fmt.Sprintf("a key named %q already exists", p.Name),
+			})
+			return
+		}
+		// ssh-keygen refuses to overwrite, so clear the way first.
+		if _, err := keys.RemoveFiles(keysDir, store.Key{PrivatePath: priv}); err != nil {
+			writeErr(w, 500, err)
+			return
+		}
+	}
+
 	k, err := keys.Generate(keysDir, p)
 	if err != nil {
 		writeErr(w, 400, err)
 		return
 	}
-	saved, err := s.st.CreateKey(k)
-	if err != nil {
+	// The keys table has no UNIQUE on name, so reuse the row rather than
+	// stacking a second record under the same name.
+	if hasDB {
+		k.ID = existing.ID
+		if err := s.st.UpdateKey(k); err != nil {
+			writeErr(w, 500, err)
+			return
+		}
+	} else if k, err = s.st.CreateKey(k); err != nil {
 		writeErr(w, 500, err)
 		return
 	}
-	writeJSON(w, 201, saved)
+	writeJSON(w, 201, k)
 }
 
 // handleImportKey imports an existing keypair. The key material is sent as JSON
@@ -361,8 +401,8 @@ func (s *Server) handleImportKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.TrimSpace(body.Name)
-	if name == "" {
-		writeErr(w, 400, fmt.Errorf("key name required"))
+	if err := keys.ValidName(name); err != nil {
+		writeErr(w, 400, err)
 		return
 	}
 	if strings.TrimSpace(body.Private) == "" {
@@ -379,7 +419,7 @@ func (s *Server) handleImportKey(w http.ResponseWriter, r *http.Request) {
 		pubData = []byte(body.Public)
 	}
 
-	keysDir := filepath.Join(s.paths.DataDir, "keys")
+	keysDir := s.keysDir()
 	existing, hasDB, _ := s.st.GetKeyByName(name)
 	_, statErr := os.Stat(filepath.Join(keysDir, name))
 	if (hasDB || statErr == nil) && !body.Overwrite {
@@ -514,17 +554,34 @@ func (s *Server) handleSSHRemove(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, list[0])
 }
 
+// handleDeleteKey drops the key record. With ?files=1 it also deletes the
+// keypair from the managed keys directory — without that, the files linger and
+// the name stays unusable for a new key.
 func (s *Server) handleDeleteKey(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r)
 	if err != nil {
 		writeErr(w, 400, err)
 		return
 	}
+	removed := 0
+	if r.URL.Query().Get("files") == "1" {
+		k, err := s.st.GetKey(id)
+		if err != nil {
+			writeErr(w, 404, err)
+			return
+		}
+		// Keep the record if the files could not go: leaving an orphan the user
+		// cannot see is exactly the bug this flag exists to fix.
+		if removed, err = keys.RemoveFiles(s.keysDir(), k); err != nil {
+			writeErr(w, 400, err)
+			return
+		}
+	}
 	if err := s.st.DeleteKey(id); err != nil {
 		writeErr(w, 500, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	writeJSON(w, 200, map[string]any{"deleted_files": removed})
 }
 
 func (s *Server) handleDeployKey(w http.ResponseWriter, r *http.Request) {
