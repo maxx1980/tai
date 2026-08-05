@@ -10,6 +10,9 @@ cmd/webssh/*.syso
 web/node_modules/
 web/dist/
 
+# Knowledge-graph artefacts (rebuild with /graphify)
+graphify-out/
+
 # Local data / editor
 *.db
 *.db-*

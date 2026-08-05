@@ -114,6 +114,11 @@ func render(hosts []store.Host) string {
 	var b strings.Builder
 	b.WriteString(managedHeader)
 	for _, h := range hosts {
+		// A host with no SSH port is not an ssh target (telnet box, appliance
+		// web UI) — emitting it would give `ssh <alias>` a broken entry.
+		if h.Port == 0 {
+			continue
+		}
 		fmt.Fprintf(&b, "\nHost %s\n", h.Alias)
 		if h.Hostname != "" {
 			fmt.Fprintf(&b, "    HostName %s\n", h.Hostname)

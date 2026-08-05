@@ -29,6 +29,10 @@ func (s *Server) sftpClient(w http.ResponseWriter, r *http.Request) (*sftp.Clien
 		writeErr(w, 404, err)
 		return nil, store.Host{}, false
 	}
+	if !hasSSH(h) {
+		writeErr(w, 400, errNoSSH(h))
+		return nil, store.Host{}, false
+	}
 	pw := r.Header.Get("X-SSH-Password")
 	if pw == "" {
 		pw = s.st.GetHostPassword(h.ID) // fall back to a saved host password

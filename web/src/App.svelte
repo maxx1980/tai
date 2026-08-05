@@ -15,7 +15,8 @@
   type View = "inventory" | "keys" | "known-hosts" | "settings";
   let view = $state<View>("inventory");
   let editing = $state<Host | null>(null);
-  let termHost = $state<Host | null>(null);
+  // The web terminal runs either ssh or telnet, chosen by the card button.
+  let termHost = $state<{ host: Host; shell: "ssh" | "telnet" } | null>(null);
   let browseHost = $state<Host | null>(null);
   let loaded = $state(false);
 
@@ -85,7 +86,7 @@
       <Inventory
         onNewHost={() => (editing = emptyHost())}
         onEditHost={(h) => (editing = h)}
-        onOpenTerminal={(h) => (termHost = h)}
+        onOpenTerminal={(h, shell) => (termHost = { host: h, shell })}
         onBrowse={(h) => (browseHost = h)}
       />
     {:else if view === "keys"}
@@ -105,7 +106,12 @@
 
 {#if termHost}
   <div class="term-overlay">
-    <Terminal hostId={termHost.id} alias={termHost.alias} onclose={() => (termHost = null)} />
+    <Terminal
+      hostId={termHost.host.id}
+      alias={termHost.host.alias}
+      shell={termHost.shell}
+      onclose={() => (termHost = null)}
+    />
   </div>
 {/if}
 

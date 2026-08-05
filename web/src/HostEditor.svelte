@@ -11,6 +11,17 @@
   let tagsText = $state(host.tags.join(", "));
   let passwordInput = $state("");
   let clearPassword = $state(false);
+
+  // Ports are edited as strings so "no such service" shows as an empty box
+  // rather than a literal 0 — binding a number would render the zero.
+  const portText = (n: number) => (n ? String(n) : "");
+  let sshPort = $state(portText(host.port));
+  let telnetPort = $state(portText(host.telnet_port));
+  let pvePort = $state(portText(host.pve_port));
+  let pbsPort = $state(portText(host.pbs_port));
+  let httpPort = $state(portText(host.http_port));
+  let httpsPort = $state(portText(host.https_port));
+  const portNum = (s: string) => Number(s.trim()) || 0;
   let extraText = $state(
     Object.entries(host.extra_options ?? {})
       .map(([k, v]) => `${k} ${v}`)
@@ -69,7 +80,14 @@
     const payload: Host = {
       ...form,
       alias: form.alias.trim(),
-      port: Number(form.port) || 22,
+      // 0 means "absent": an empty SSH port marks a host with no SSH at all,
+      // and an empty service port hides that button on the card.
+      port: portNum(sshPort),
+      telnet_port: portNum(telnetPort),
+      pve_port: portNum(pvePort),
+      pbs_port: portNum(pbsPort),
+      http_port: portNum(httpPort),
+      https_port: portNum(httpsPort),
       tags: tagsText
         .split(",")
         .map((t) => t.trim())
@@ -158,8 +176,44 @@
         <input id="hostname" bind:value={form.hostname} placeholder="10.0.0.5 or example.com" />
       </div>
       <div class="field" style="flex:1">
-        <label for="port">Port</label>
-        <input id="port" type="number" bind:value={form.port} />
+        <label for="port">SSH port</label>
+        <input
+          id="port"
+          class="portin"
+          type="number"
+          bind:value={sshPort}
+          placeholder="22 — empty = no SSH"
+        />
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="grouplabel">Service ports — leave empty for the ones this host does not run</div>
+      <div class="ports">
+        <div class="pfield">
+          <label for="telnet-port">Telnet</label>
+          <input id="telnet-port" class="portin" type="number" bind:value={telnetPort} placeholder="23" />
+        </div>
+        <div class="pfield">
+          <label for="pve-port">PVE</label>
+          <input id="pve-port" class="portin" type="number" bind:value={pvePort} placeholder="8006" />
+        </div>
+        <div class="pfield">
+          <label for="pbs-port">PBS</label>
+          <input id="pbs-port" class="portin" type="number" bind:value={pbsPort} placeholder="8007" />
+        </div>
+        <div class="pfield">
+          <label for="http-port">HTTP</label>
+          <input id="http-port" class="portin" type="number" bind:value={httpPort} placeholder="80" />
+        </div>
+        <div class="pfield">
+          <label for="https-port">HTTPS</label>
+          <input id="https-port" class="portin" type="number" bind:value={httpsPort} placeholder="443" />
+        </div>
+      </div>
+      <div class="muted" style="font-size:12px;margin-top:6px">
+        An empty SSH port hides the terminal, files and mount buttons on the card — use it for a
+        telnet-only box or an appliance you only reach over its web UI.
       </div>
     </div>
 
@@ -284,6 +338,15 @@
     border-radius: 8px;
     padding: 10px 12px;
   }
+  .grouplabel { font-size: 12.5px; color: var(--muted); margin-bottom: 4px; }
+  .ports { display: flex; gap: 8px; flex-wrap: wrap; }
+  .pfield { flex: 1; min-width: 84px; }
+  .pfield label { margin-bottom: 3px; }
+
+  /* A configured port must read differently from the suggestion in an empty
+     box: bold when set, faint when it is only a placeholder. */
+  .portin:not(:placeholder-shown) { font-weight: 700; }
+  .portin::placeholder { color: var(--muted); opacity: 0.5; font-weight: 400; }
   .okmsg { color: var(--success); font-size: 12.5px; margin-top: 6px; }
   .failmsg { color: var(--danger); font-size: 12.5px; margin-top: 6px; }
 </style>

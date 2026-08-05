@@ -14,6 +14,14 @@ const (
 	KeyMountBaseDir = "mount_base_dir"
 	KeyTheme        = "theme"
 
+	// KeyTelnetBackspace selects what the Backspace key sends in a telnet
+	// terminal: "bs" (Ctrl-H, 0x08) or "del" (0x7F). Telnet has no way to
+	// negotiate the erase character, so the far end simply expects one of the
+	// two — network gear and older Unix want BS, which is why that is the
+	// default; a host that wants DEL is one toggle away in the terminal bar.
+	// SSH is unaffected: its PTY carries the real terminal settings.
+	KeyTelnetBackspace = "telnet_backspace"
+
 	// KeyAuthDisabled ("1" = on) turns off the API-key check. Not a secret; the
 	// loopback bind and Origin check on mutations still apply.
 	KeyAuthDisabled = "auth_disabled"
@@ -45,13 +53,14 @@ func Defaults(home string) map[string]string {
 		KeyFilesCmd:    "xdg-open {{mountpoint}}",
 		// Empty means "use the system default browser" (xdg-open / open / rundll32).
 		// A custom command may use the {{url}} placeholder, else the URL is appended.
-		KeyBrowserCmd:   "",
-		KeyMountBaseDir: filepath.Join(home, "mnt", "webssh"),
-		KeyTheme:        "system",
-		KeyAuthDisabled: "",
-		KeyExitOnClose:  "1",
-		KeyUIMode:       "app",
-		KeyAppBrowser:   "",
+		KeyBrowserCmd:      "",
+		KeyMountBaseDir:    filepath.Join(home, "mnt", "webssh"),
+		KeyTheme:           "system",
+		KeyTelnetBackspace: "bs",
+		KeyAuthDisabled:    "",
+		KeyExitOnClose:     "1",
+		KeyUIMode:          "app",
+		KeyAppBrowser:      "",
 	}
 }
 

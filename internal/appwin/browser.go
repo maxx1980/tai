@@ -18,15 +18,21 @@ type browserUI struct {
 func (b *browserUI) Blocking() bool { return false }
 func (b *browserUI) Close()         {}
 
-func (b *browserUI) Open(rawURL string) error {
+func (b *browserUI) Open(rawURL string) error { return OpenURL(b.cmd, rawURL) }
+
+// OpenURL hands rawURL to the user's browser command, falling back to the
+// platform's default handler when none is configured (or it is unparseable).
+// Exported so the API can open a host's web UI — Proxmox, a plain HTTP service —
+// in a real browser window rather than inside the chromeless app window.
+func OpenURL(browserCmd, rawURL string) error {
 	var name string
 	var args []string
 
-	if strings.TrimSpace(b.cmd) != "" {
-		hasPlaceholder := strings.Contains(b.cmd, "{{url}}")
-		tmpl := strings.ReplaceAll(b.cmd, "{{url}}", rawURL)
+	if strings.TrimSpace(browserCmd) != "" {
+		hasPlaceholder := strings.Contains(browserCmd, "{{url}}")
+		tmpl := strings.ReplaceAll(browserCmd, "{{url}}", rawURL)
 		if fields, err := launcher.SplitFields(tmpl); err != nil || len(fields) == 0 {
-			log.Printf("invalid browser command %q (%v); using system default", b.cmd, err)
+			log.Printf("invalid browser command %q (%v); using system default", browserCmd, err)
 		} else {
 			name, args = fields[0], fields[1:]
 			if !hasPlaceholder {

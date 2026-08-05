@@ -2,7 +2,16 @@
   import Fuse from "fuse.js";
   import { api, ApiError } from "./api";
   import { app, health, refresh, notify } from "./store.svelte";
-  import type { Host, Group } from "./types";
+  import {
+    DISCOVERY_PORTS,
+    portsFromScan,
+    serviceUrl,
+    type Group,
+    type Host,
+    type ScanResult,
+    type ServiceKind,
+  } from "./types";
+  import ScanPanel from "./ScanPanel.svelte";
 
   let {
     onEditHost,
@@ -12,22 +21,35 @@
   }: {
     onEditHost: (h: Host) => void;
     onNewHost: () => void;
-    onOpenTerminal: (h: Host) => void;
+    onOpenTerminal: (h: Host, shell: "ssh" | "telnet") => void;
     onBrowse: (h: Host) => void;
   } = $props();
 
   let query = $state("");
+  // selectedGroup === null selects the "Misc hosts" node, which holds exactly
+  // the hosts that belong to no group.
   let selectedGroup = $state<number | null>(null);
   let activeTags = $state<Set<string>>(new Set());
   let busyId = $state<number | null>(null);
   let mountPw = $state<{ host: Host; afterFiles: boolean } | null>(null);
   let mountPwValue = $state("");
+  let scanOpen = $state(false);
 
-  // Tree state: collapsed node ids (-1 = the "All hosts" node), drag/drop.
-  const ALL = -1;
+  // Tree state: collapsed node ids (-1 = the "Misc hosts" node), drag/drop.
+  const MISC = -1;
   let collapsed = $state<Set<number>>(new Set());
   let dragHostId = $state<number | null>(null);
-  let dropTarget = $state<number | null>(null); // group id, or ALL, or null
+  let dropTarget = $state<number | null>(null); // group id, or MISC, or null
+
+  // Start with every group folded away, so the tree opens on Misc hosts alone
+  // and a large inventory does not unfurl at once. Groups arrive with the first
+  // refresh, hence the one-shot effect rather than an initialiser.
+  let treeInitialised = false;
+  $effect(() => {
+    if (treeInitialised || app.groups.length === 0) return;
+    collapsed = new Set(app.groups.map((g) => g.id));
+    treeInitialised = true;
+  });
 
   const baseDir = $derived(app.settings.mount_base_dir ?? "");
   const mountedPoints = $derived(new Set(app.mounts.map((m) => m.mountpoint)));
@@ -98,7 +120,7 @@
     try {
       await api.put(`/api/hosts/${hostId}`, { ...h, group_id: groupId });
       await refresh();
-      const dest = groupId == null ? "All hosts" : app.groups.find((g) => g.id === groupId)?.name;
+      const dest = groupId == null ? "Misc hosts" : app.groups.find((g) => g.id === groupId)?.name;
       notify("info", `Moved ${h.alias} → ${dest}`);
     } catch (e) {
       notify("error", String(e));
@@ -131,7 +153,10 @@
 
   const visible = $derived.by(() => {
     let hosts = query.trim() ? fuse.search(query).map((r) => r.item) : app.hosts;
-    if (selectedGroup != null) {
+    if (selectedGroup == null) {
+      // Misc hosts: the ones no group claims.
+      hosts = hosts.filter((h) => h.group_id == null);
+    } else {
       const ids = descendants(selectedGroup);
       hosts = hosts.filter((h) => h.group_id != null && ids.has(h.group_id));
     }
@@ -204,6 +229,57 @@
     act(h, async () => {
       await api.post(`/api/launch/terminal/${h.id}`);
       notify("info", `Opening terminal for ${h.alias}`);
+    });
+
+  // openService asks the daemon to open a host's web UI in the real browser.
+  // Going through the API (rather than window.open) keeps admin panels out of
+  // the chromeless app window, which has no address bar.
+  const openService = (h: Host, kind: ServiceKind) =>
+    act(h, async () => {
+      const r = await api.post<{ url: string }>(`/api/launch/url/${h.id}`, { kind });
+      notify("info", `Opening ${r.url}`);
+    });
+
+  // hasAnyAction reports whether a host has at least one reachable service, so a
+  // card with nothing configured can say so instead of showing an empty row.
+  function hasAnyAction(h: Host): boolean {
+    return Boolean(h.port || h.telnet_port || h.pve_port || h.pbs_port || h.http_port || h.https_port);
+  }
+
+  // rescan probes one host for the services a card can act on and opens the
+  // editor with what it found. It deliberately stops short of saving: a box that
+  // is merely offline would otherwise have its whole port set silently wiped.
+  // The host's own ports are probed alongside the standard ones, so a service on
+  // an unusual port (SSH on 2222) is rediscovered rather than dropped.
+  const rescan = (h: Host) =>
+    act(h, async () => {
+      const ports = [
+        ...new Set([
+          ...DISCOVERY_PORTS,
+          h.port,
+          h.telnet_port,
+          h.pve_port,
+          h.pbs_port,
+          h.http_port,
+          h.https_port,
+        ]),
+      ].filter((p) => p > 0);
+
+      const r = await api.post<ScanResult>("/api/scan", {
+        targets: h.hostname || h.alias,
+        ports,
+        timeout_ms: 1500,
+      });
+      const found = r.hosts[0];
+      if (!found) {
+        notify("error", `${h.alias}: nothing answered on ${ports.join(", ")} — host left unchanged`);
+        return;
+      }
+      notify(
+        "success",
+        `${h.alias}: ${found.services.map((s) => `${s.name}/${s.port}`).join(", ")} — review and save`,
+      );
+      onEditHost({ ...h, ...portsFromScan(found) });
     });
 
   // mountHost mounts h; on a password-required response it opens the web
@@ -342,18 +418,20 @@
       <button class="sm ghost" onclick={newGroup} title="New group">+ Group</button>
     </div>
     <div class="tree scroll">
-      <!-- All hosts / ungrouped node (drop here to remove from a group) -->
+      <!-- Misc hosts: everything that belongs to no group (drop here to unassign) -->
       <div
-        class="tnode grp {selectedGroup === null ? 'active' : ''} {dropTarget === ALL ? 'drop' : ''}"
+        class="tnode grp {selectedGroup === null ? 'active' : ''} {dropTarget === MISC
+          ? 'drop'
+          : ''}"
         role="treeitem"
         aria-selected={selectedGroup === null}
         tabindex="0"
         ondragover={(e) => {
           e.preventDefault();
-          dropTarget = ALL;
+          dropTarget = MISC;
         }}
         ondragleave={() => {
-          if (dropTarget === ALL) dropTarget = null;
+          if (dropTarget === MISC) dropTarget = null;
         }}
         ondrop={(e) => onDrop(e, null)}
         onclick={() => (selectedGroup = null)}
@@ -363,17 +441,17 @@
           class="caret"
           onclick={(e) => {
             e.stopPropagation();
-            toggleExpand(ALL);
+            toggleExpand(MISC);
           }}
         >
-          {directHosts(null).length ? (isExpanded(ALL) ? "▾" : "▸") : ""}
+          {directHosts(null).length ? (isExpanded(MISC) ? "▾" : "▸") : ""}
         </button>
         <span class="ticon">🗂️</span>
-        <span class="tlabel">All hosts</span>
+        <span class="tlabel">Misc hosts</span>
         <span class="spacer"></span>
-        <span class="muted count">{app.hosts.length}</span>
+        <span class="muted count">{directHosts(null).length}</span>
       </div>
-      {#if isExpanded(ALL)}
+      {#if isExpanded(MISC)}
         {#each directHosts(null) as h (h.id)}
           {@render hostNode(h, 1)}
         {/each}
@@ -402,10 +480,19 @@
       <strong>{visible.length} host{visible.length === 1 ? "" : "s"}</strong>
       <div class="spacer"></div>
       <button class="primary" onclick={onNewHost}>+ New host</button>
+      <button onclick={() => (scanOpen = true)} title="Find hosts with SSH/telnet open on the network">
+        Scan
+      </button>
     </div>
 
     {#if visible.length === 0}
-      <p class="muted">No hosts. Add one, or import from ~/.ssh/config in Settings.</p>
+      <p class="muted">
+        {#if selectedGroup === null && app.hosts.length > 0}
+          No ungrouped hosts — pick a group in the sidebar, or drag a host onto Misc hosts.
+        {:else}
+          No hosts. Add one, or import from ~/.ssh/config in Settings.
+        {/if}
+      </p>
     {/if}
 
     <div class="cards">
@@ -428,6 +515,14 @@
             <strong title="Drag onto a group in the sidebar to move">⠿ {h.alias}</strong>
             {#if isMounted(h)}<span class="tag" title="sshfs mounted">mounted</span>{/if}
             <div class="spacer"></div>
+            <button
+              class="sm ghost"
+              disabled={busyId === h.id}
+              title="Probe this host's ports and open the editor with what is found"
+              onclick={() => rescan(h)}
+            >
+              {busyId === h.id ? "Scanning…" : "Rescan"}
+            </button>
             <button class="sm ghost" onclick={() => onEditHost(h)}>Edit</button>
             <button class="sm ghost danger" onclick={() => deleteHost(h)}>Del</button>
           </div>
@@ -442,27 +537,63 @@
             </div>
           {/if}
           <div class="row actions">
-            <button class="sm" disabled={busyId === h.id} onclick={() => onOpenTerminal(h)}>
-              Web term
-            </button>
-            <button class="sm" disabled={busyId === h.id} onclick={() => launchTerminal(h)}>
-              Terminal
-            </button>
-            <button class="sm" disabled={busyId === h.id} onclick={() => openFiles(h)}>
-              Files
-            </button>
-            <button class="sm" disabled={busyId === h.id} onclick={() => onBrowse(h)}>
-              Browse
-            </button>
-            <button class="sm" disabled={busyId === h.id} onclick={() => toggleMount(h)}>
-              {isMounted(h) ? "Unmount" : "Mount"}
-            </button>
+            <!-- SSH-backed actions only exist when the host has an SSH port. -->
+            {#if h.port}
+              <button class="sm" disabled={busyId === h.id} onclick={() => onOpenTerminal(h, "ssh")}>
+                Web term
+              </button>
+              <button class="sm" disabled={busyId === h.id} onclick={() => launchTerminal(h)}>
+                Terminal
+              </button>
+              <button class="sm" disabled={busyId === h.id} onclick={() => openFiles(h)}>
+                Files
+              </button>
+              <button class="sm" disabled={busyId === h.id} onclick={() => onBrowse(h)}>
+                Browse
+              </button>
+              <button class="sm" disabled={busyId === h.id} onclick={() => toggleMount(h)}>
+                {isMounted(h) ? "Unmount" : "Mount"}
+              </button>
+            {/if}
+            {#if h.telnet_port}
+              <button
+                class="sm"
+                disabled={busyId === h.id}
+                title="Web terminal over telnet, port {h.telnet_port}"
+                onclick={() => onOpenTerminal(h, "telnet")}
+              >
+                Telnet
+              </button>
+            {/if}
+            {#if h.pve_port}
+              <button class="sm" disabled={busyId === h.id} title={serviceUrl(h, "pve")}
+                onclick={() => openService(h, "pve")}>PVE</button>
+            {/if}
+            {#if h.pbs_port}
+              <button class="sm" disabled={busyId === h.id} title={serviceUrl(h, "pbs")}
+                onclick={() => openService(h, "pbs")}>PBS</button>
+            {/if}
+            {#if h.http_port}
+              <button class="sm" disabled={busyId === h.id} title={serviceUrl(h, "http")}
+                onclick={() => openService(h, "http")}>HTTP</button>
+            {/if}
+            {#if h.https_port}
+              <button class="sm" disabled={busyId === h.id} title={serviceUrl(h, "https")}
+                onclick={() => openService(h, "https")}>HTTPS</button>
+            {/if}
+            {#if !hasAnyAction(h)}
+              <span class="muted" style="font-size:12px">No ports set — use Rescan or Edit</span>
+            {/if}
           </div>
         </div>
       {/each}
     </div>
   </main>
 </div>
+
+{#if scanOpen}
+  <ScanPanel onClose={() => (scanOpen = false)} />
+{/if}
 
 {#if mountPw}
   <div class="overlay" onclick={() => (mountPw = null)}>

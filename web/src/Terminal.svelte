@@ -1,12 +1,48 @@
 <script lang="ts">
   import { Terminal } from "@xterm/xterm";
   import { FitAddon } from "@xterm/addon-fit";
-  import { terminalURL } from "./api";
+  import { api, terminalURL } from "./api";
+  import { app, notify } from "./store.svelte";
 
-  let { hostId, alias, onclose }: { hostId: number; alias: string; onclose: () => void } =
-    $props();
+  let {
+    hostId,
+    alias,
+    shell = "ssh",
+    onclose,
+  }: {
+    hostId: number;
+    alias: string;
+    shell?: "ssh" | "telnet";
+    onclose: () => void;
+  } = $props();
 
   let container: HTMLDivElement;
+
+  // xterm.js sends DEL (0x7F) for Backspace. Telnet cannot negotiate which byte
+  // means erase, so the far end just expects one of the two — network gear and
+  // older Unix want BS (0x08), which is why that is the default. SSH is left
+  // alone: its PTY carries the real terminal settings.
+  const backspaceMode = $derived(app.settings.telnet_backspace ?? "bs");
+
+  // rewriteInput is applied to telnet input only, and reads the setting at
+  // keystroke time rather than in the $effect below — depending on it there
+  // would tear down and rebuild the whole session on every toggle.
+  function rewriteInput(d: string): string {
+    if (shell !== "telnet") return d;
+    if ((app.settings.telnet_backspace ?? "bs") !== "bs") return d;
+    return d.replaceAll("\x7f", "\b");
+  }
+
+  async function toggleBackspace() {
+    const next = backspaceMode === "bs" ? "del" : "bs";
+    try {
+      app.settings = await api.put<Record<string, string>>("/api/settings", {
+        telnet_backspace: next,
+      });
+    } catch (e) {
+      notify("error", String(e));
+    }
+  }
 
   $effect(() => {
     const term = new Terminal({
@@ -21,7 +57,7 @@
     fit.fit();
     term.focus();
 
-    const ws = new WebSocket(terminalURL(hostId));
+    const ws = new WebSocket(terminalURL(hostId, shell));
     ws.binaryType = "arraybuffer";
     const enc = new TextEncoder();
 
@@ -40,7 +76,7 @@
     ws.onerror = () => term.write("\r\n\x1b[31m[connection error]\x1b[0m\r\n");
 
     const dataSub = term.onData((d) => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(enc.encode(d));
+      if (ws.readyState === WebSocket.OPEN) ws.send(enc.encode(rewriteInput(d)));
     });
 
     const ro = new ResizeObserver(() => {
@@ -64,8 +100,17 @@
   <div class="term-bar">
     <span class="dot"></span>
     <strong>{alias}</strong>
-    <span class="muted mono" style="font-size:12px">web terminal</span>
+    <span class="muted mono" style="font-size:12px">{shell} terminal</span>
     <div class="spacer"></div>
+    {#if shell === "telnet"}
+      <button
+        class="sm ghost"
+        onclick={toggleBackspace}
+        title="What Backspace sends. Switch if the remote host ignores it or prints ^H."
+      >
+        ⌫ sends {backspaceMode === "bs" ? "^H" : "^?"}
+      </button>
+    {/if}
     <button class="sm ghost" onclick={onclose}>Close ✕</button>
   </div>
   <div class="term" bind:this={container}></div>

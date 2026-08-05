@@ -179,9 +179,11 @@ export const resetAll = (password: string) =>
   request<{ ok: boolean }>("POST", "/api/reset", { body: { password } });
 
 // terminalURL builds the websocket URL (token as query param) for a host.
-export function terminalURL(hostId: number): string {
-  const proto = location.protocol === "https:" ? "wss" : "ws";
-  return `${proto}://${location.host}/api/terminal/${hostId}?token=${encodeURIComponent(token())}`;
+// shell selects which client the daemon runs: ssh (default) or telnet.
+export function terminalURL(hostId: number, shell: "ssh" | "telnet" = "ssh"): string {
+  const ws = location.protocol === "https:" ? "wss" : "ws";
+  const q = shell === "telnet" ? "&proto=telnet" : "";
+  return `${ws}://${location.host}/api/terminal/${hostId}?token=${encodeURIComponent(token())}${q}`;
 }
 
 // presenceURL builds the websocket URL that tells the daemon this tab is open.

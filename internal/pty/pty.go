@@ -1,5 +1,6 @@
-// Package pty starts an `ssh <alias>` session attached to a pseudo-terminal so
-// it can be bridged to a browser xterm.js terminal over a websocket.
+// Package pty starts an `ssh` session attached to a pseudo-terminal so it can be
+// bridged to a browser xterm.js terminal over a websocket. (Telnet needs no PTY:
+// internal/telnet talks the protocol directly over TCP.)
 package pty
 
 import (
@@ -30,6 +31,11 @@ func Start(args []string, extraEnv []string) (*Session, error) {
 	}
 	return &Session{Cmd: cmd, Pty: f}, nil
 }
+
+// Read and Write bridge the PTY, so a Session satisfies the same terminal
+// interface as a direct telnet connection.
+func (s *Session) Read(p []byte) (int, error)  { return s.Pty.Read(p) }
+func (s *Session) Write(p []byte) (int, error) { return s.Pty.Write(p) }
 
 // Resize sets the PTY window size.
 func (s *Session) Resize(rows, cols uint16) error {

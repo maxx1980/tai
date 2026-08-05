@@ -610,6 +610,10 @@ func (s *Server) handleDeployKey(w http.ResponseWriter, r *http.Request) {
 			results = append(results, map[string]any{"host_id": hid, "ok": false, "error": "host not found"})
 			continue
 		}
+		if !hasSSH(h) {
+			results = append(results, map[string]any{"host_id": hid, "alias": h.Alias, "ok": false, "error": errNoSSH(h).Error()})
+			continue
+		}
 		// Prefer the host's saved password; fall back to one supplied in the
 		// request (used when a host has no stored password).
 		pw := s.st.GetHostPassword(hid)
@@ -638,6 +642,16 @@ func hostAddr(h store.Host) string {
 	return h.Alias
 }
 
+// errNoSSH guards the SSH-backed features (terminal, SFTP, sshfs, key deploy)
+// against hosts recorded with no SSH port — a telnet box or an appliance whose
+// card only offers a web UI. The SPA already hides those buttons; this keeps a
+// direct API call from failing deep inside ssh with a confusing message.
+func errNoSSH(h store.Host) error {
+	return fmt.Errorf("host %s has no SSH port — this action needs SSH", h.Alias)
+}
+
+func hasSSH(h store.Host) bool { return h.Port != 0 }
+
 // ---- mounts ----
 
 func (s *Server) handleListMounts(w http.ResponseWriter, r *http.Request) {
@@ -654,6 +668,10 @@ func (s *Server) handleMount(w http.ResponseWriter, r *http.Request) {
 	h, base, err := s.hostAndBase(r)
 	if err != nil {
 		writeErr(w, 404, err)
+		return
+	}
+	if !hasSSH(h) {
+		writeErr(w, 400, errNoSSH(h))
 		return
 	}
 	// Optional password (empty body is fine). Fall back to a saved host password.
@@ -726,6 +744,10 @@ func (s *Server) launch(w http.ResponseWriter, r *http.Request, cmdKey string) {
 	h, err := s.st.GetHost(id)
 	if err != nil {
 		writeErr(w, 404, err)
+		return
+	}
+	if !hasSSH(h) {
+		writeErr(w, 400, errNoSSH(h))
 		return
 	}
 	settings := s.settingsWithDefaults()

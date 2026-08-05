@@ -26,13 +26,22 @@ type Group struct {
 	Sort     int    `json:"sort"`
 }
 
-// Host is a single SSH endpoint.
+// Host is a single managed machine. Port is the SSH port and doubles as the
+// switch for every SSH-backed feature: 0 means "this box has no SSH", and the
+// terminal, SFTP, sshfs and ssh_config export all skip it. The remaining
+// *Port fields are optional services the host also exposes; 0 means "absent"
+// and the UI hides the matching button.
 type Host struct {
 	ID           int64             `json:"id"`
 	Alias        string            `json:"alias"`
 	Hostname     string            `json:"hostname"`
 	User         string            `json:"user"`
 	Port         int               `json:"port"`
+	TelnetPort   int               `json:"telnet_port"`
+	PVEPort      int               `json:"pve_port"`
+	PBSPort      int               `json:"pbs_port"`
+	HTTPPort     int               `json:"http_port"`
+	HTTPSPort    int               `json:"https_port"`
 	IdentityFile string            `json:"identity_file"`
 	ProxyJump    string            `json:"proxy_jump"`
 	ExtraOptions map[string]string `json:"extra_options"`
@@ -145,9 +154,15 @@ CREATE TABLE IF NOT EXISTS known_hosts (
 	if _, err := s.db.Exec(schema); err != nil {
 		return err
 	}
-	// Incremental migrations (ignore "duplicate column" on re-run).
+	// Incremental migrations (ignore "duplicate column" on re-run). The service
+	// ports default to 0, meaning "this host does not expose that service".
 	for _, stmt := range []string{
 		`ALTER TABLE hosts ADD COLUMN password TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE hosts ADD COLUMN telnet_port INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE hosts ADD COLUMN pve_port INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE hosts ADD COLUMN pbs_port INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE hosts ADD COLUMN http_port INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE hosts ADD COLUMN https_port INTEGER NOT NULL DEFAULT 0`,
 	} {
 		if _, err := s.db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return err
@@ -201,8 +216,14 @@ func (s *Store) DeleteGroup(id int64) error {
 // ---- Hosts ----
 
 // ListHosts returns all hosts with their tags attached.
+// hostCols is the column list every host read shares, in the order scanHost
+// expects. Kept in one place so a new column cannot be added to one query and
+// forgotten in the other.
+const hostCols = `id, alias, hostname, user, port, telnet_port, pve_port, pbs_port, http_port, https_port,
+	identity_file, proxy_jump, extra_options, group_id, notes, created_at, updated_at, (password != '')`
+
 func (s *Store) ListHosts() ([]Host, error) {
-	rows, err := s.db.Query(`SELECT id, alias, hostname, user, port, identity_file, proxy_jump, extra_options, group_id, notes, created_at, updated_at, (password != '') FROM hosts ORDER BY alias`)
+	rows, err := s.db.Query(`SELECT ` + hostCols + ` FROM hosts ORDER BY alias`)
 	if err != nil {
 		return nil, err
 	}
@@ -226,7 +247,7 @@ func (s *Store) ListHosts() ([]Host, error) {
 
 // GetHost returns a single host by ID with tags.
 func (s *Store) GetHost(id int64) (Host, error) {
-	row := s.db.QueryRow(`SELECT id, alias, hostname, user, port, identity_file, proxy_jump, extra_options, group_id, notes, created_at, updated_at, (password != '') FROM hosts WHERE id=?`, id)
+	row := s.db.QueryRow(`SELECT `+hostCols+` FROM hosts WHERE id=?`, id)
 	h, err := scanHost(row)
 	if err != nil {
 		return Host{}, err
@@ -243,7 +264,10 @@ type scanner interface{ Scan(dest ...any) error }
 func scanHost(sc scanner) (Host, error) {
 	var h Host
 	var extra string
-	if err := sc.Scan(&h.ID, &h.Alias, &h.Hostname, &h.User, &h.Port, &h.IdentityFile, &h.ProxyJump, &extra, &h.GroupID, &h.Notes, &h.CreatedAt, &h.UpdatedAt, &h.HasPassword); err != nil {
+	if err := sc.Scan(&h.ID, &h.Alias, &h.Hostname, &h.User, &h.Port,
+		&h.TelnetPort, &h.PVEPort, &h.PBSPort, &h.HTTPPort, &h.HTTPSPort,
+		&h.IdentityFile, &h.ProxyJump, &extra, &h.GroupID, &h.Notes,
+		&h.CreatedAt, &h.UpdatedAt, &h.HasPassword); err != nil {
 		return Host{}, err
 	}
 	h.ExtraOptions = map[string]string{}
@@ -283,11 +307,10 @@ func (s *Store) attachTags(hosts []Host) error {
 // CreateHost inserts a host (and its tags) and returns it with the new ID.
 func (s *Store) CreateHost(h Host) (Host, error) {
 	extra, _ := json.Marshal(h.ExtraOptions)
-	if h.Port == 0 {
-		h.Port = 22
-	}
-	res, err := s.db.Exec(`INSERT INTO hosts (alias, hostname, user, port, identity_file, proxy_jump, extra_options, group_id, notes, password) VALUES (?,?,?,?,?,?,?,?,?,?)`,
-		h.Alias, h.Hostname, h.User, h.Port, h.IdentityFile, h.ProxyJump, string(extra), h.GroupID, h.Notes, h.Password)
+	normalizePorts(&h)
+	res, err := s.db.Exec(`INSERT INTO hosts (alias, hostname, user, port, telnet_port, pve_port, pbs_port, http_port, https_port, identity_file, proxy_jump, extra_options, group_id, notes, password) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		h.Alias, h.Hostname, h.User, h.Port, h.TelnetPort, h.PVEPort, h.PBSPort, h.HTTPPort, h.HTTPSPort,
+		h.IdentityFile, h.ProxyJump, string(extra), h.GroupID, h.Notes, h.Password)
 	if err != nil {
 		return Host{}, err
 	}
@@ -316,7 +339,10 @@ func (s *Store) GetHostPassword(id int64) string {
 	return pw
 }
 
-// UpsertHostByAlias inserts or updates a host keyed by its unique alias. Used by import.
+// UpsertHostByAlias inserts or updates a host keyed by its unique alias. Used by
+// import. ssh_config has no way to express the telnet/PVE/PBS/HTTP ports, so a
+// re-import keeps whatever the user configured for those rather than zeroing
+// them.
 func (s *Store) UpsertHostByAlias(h Host) (Host, error) {
 	var id int64
 	err := s.db.QueryRow(`SELECT id FROM hosts WHERE alias=?`, h.Alias).Scan(&id)
@@ -325,6 +351,23 @@ func (s *Store) UpsertHostByAlias(h Host) (Host, error) {
 		return s.CreateHost(h)
 	case nil:
 		h.ID = id
+		if existing, gerr := s.GetHost(id); gerr == nil {
+			if h.TelnetPort == 0 {
+				h.TelnetPort = existing.TelnetPort
+			}
+			if h.PVEPort == 0 {
+				h.PVEPort = existing.PVEPort
+			}
+			if h.PBSPort == 0 {
+				h.PBSPort = existing.PBSPort
+			}
+			if h.HTTPPort == 0 {
+				h.HTTPPort = existing.HTTPPort
+			}
+			if h.HTTPSPort == 0 {
+				h.HTTPSPort = existing.HTTPSPort
+			}
+		}
 		if err := s.UpdateHost(h); err != nil {
 			return Host{}, err
 		}
@@ -337,15 +380,25 @@ func (s *Store) UpsertHostByAlias(h Host) (Host, error) {
 // UpdateHost updates a host and replaces its tag set.
 func (s *Store) UpdateHost(h Host) error {
 	extra, _ := json.Marshal(h.ExtraOptions)
-	if h.Port == 0 {
-		h.Port = 22
-	}
-	_, err := s.db.Exec(`UPDATE hosts SET alias=?, hostname=?, user=?, port=?, identity_file=?, proxy_jump=?, extra_options=?, group_id=?, notes=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
-		h.Alias, h.Hostname, h.User, h.Port, h.IdentityFile, h.ProxyJump, string(extra), h.GroupID, h.Notes, h.ID)
+	normalizePorts(&h)
+	_, err := s.db.Exec(`UPDATE hosts SET alias=?, hostname=?, user=?, port=?, telnet_port=?, pve_port=?, pbs_port=?, http_port=?, https_port=?, identity_file=?, proxy_jump=?, extra_options=?, group_id=?, notes=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+		h.Alias, h.Hostname, h.User, h.Port, h.TelnetPort, h.PVEPort, h.PBSPort, h.HTTPPort, h.HTTPSPort,
+		h.IdentityFile, h.ProxyJump, string(extra), h.GroupID, h.Notes, h.ID)
 	if err != nil {
 		return err
 	}
 	return s.setHostTags(h.ID, h.Tags)
+}
+
+// normalizePorts clamps every port to a legal TCP port or 0 ("service absent"),
+// so a negative or out-of-range value from a client can never be stored and
+// later dialled.
+func normalizePorts(h *Host) {
+	for _, p := range []*int{&h.Port, &h.TelnetPort, &h.PVEPort, &h.PBSPort, &h.HTTPPort, &h.HTTPSPort} {
+		if *p < 0 || *p > 65535 {
+			*p = 0
+		}
+	}
 }
 
 // DeleteHost removes a host and its tag/key links (via cascade).
@@ -728,11 +781,10 @@ func (s *Store) ImportAll(snap *Snapshot) error {
 
 	for _, h := range snap.Hosts {
 		extra, _ := json.Marshal(h.ExtraOptions)
-		if h.Port == 0 {
-			h.Port = 22
-		}
-		if _, err := tx.Exec(`INSERT INTO hosts (id, alias, hostname, user, port, identity_file, proxy_jump, extra_options, group_id, notes, password, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			h.ID, h.Alias, h.Hostname, h.User, h.Port, h.IdentityFile, h.ProxyJump, string(extra), h.GroupID, h.Notes, h.Password, h.CreatedAt, h.UpdatedAt); err != nil {
+		normalizePorts(&h)
+		if _, err := tx.Exec(`INSERT INTO hosts (id, alias, hostname, user, port, telnet_port, pve_port, pbs_port, http_port, https_port, identity_file, proxy_jump, extra_options, group_id, notes, password, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			h.ID, h.Alias, h.Hostname, h.User, h.Port, h.TelnetPort, h.PVEPort, h.PBSPort, h.HTTPPort, h.HTTPSPort,
+			h.IdentityFile, h.ProxyJump, string(extra), h.GroupID, h.Notes, h.Password, h.CreatedAt, h.UpdatedAt); err != nil {
 			return err
 		}
 		for _, name := range h.Tags {

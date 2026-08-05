@@ -3,9 +3,13 @@
 //
 // The probe deliberately does NOT perform a full SSH login (no auth, no account
 // lockout risk, no auth-log spam). It only asks two cheap questions:
-//   - is the SSH TCP port open?   → green
+//   - is the host's primary TCP port open?  → green
 //   - else, does the host answer ICMP ping? → yellow
-//   - neither                      → red
+//   - neither                               → red
+//
+// The primary port is SSH when the host has one; hosts without SSH (a telnet
+// box, a Proxmox appliance reached only over its web UI) fall back to whichever
+// service port they do expose, so their dot still means something.
 package health
 
 import (
@@ -107,16 +111,19 @@ func (c *Checker) checkAll(ctx context.Context) {
 	c.mu.Unlock()
 }
 
-// probe returns the reachability state for a single host: open SSH port → green,
-// else ping-only → yellow, else red.
+// probe returns the reachability state for a single host: primary port open →
+// green, else ping-only → yellow, else red. A host with no port at all is judged
+// on ping alone.
 func (c *Checker) probe(ctx context.Context, h store.Host) State {
 	host := hostOf(h)
-	addr := net.JoinHostPort(host, strconv.Itoa(portOf(h)))
 
-	d := net.Dialer{Timeout: dialTimeout}
-	if conn, err := d.DialContext(ctx, "tcp", addr); err == nil {
-		_ = conn.Close()
-		return Green
+	if port := portOf(h); port > 0 {
+		addr := net.JoinHostPort(host, strconv.Itoa(port))
+		d := net.Dialer{Timeout: dialTimeout}
+		if conn, err := d.DialContext(ctx, "tcp", addr); err == nil {
+			_ = conn.Close()
+			return Green
+		}
 	}
 	if pingOK(ctx, host) {
 		return Yellow
@@ -141,9 +148,14 @@ func hostOf(h store.Host) string {
 	return h.Alias
 }
 
+// portOf picks the port that best represents "this host is up": SSH when it has
+// one, otherwise the first other service it exposes. Returns 0 when the host has
+// no ports at all.
 func portOf(h store.Host) int {
-	if h.Port > 0 {
-		return h.Port
+	for _, p := range []int{h.Port, h.TelnetPort, h.PVEPort, h.PBSPort, h.HTTPSPort, h.HTTPPort} {
+		if p > 0 {
+			return p
+		}
 	}
-	return 22
+	return 0
 }

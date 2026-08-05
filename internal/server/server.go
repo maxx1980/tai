@@ -181,8 +181,12 @@ func (s *Server) routes() {
 	api("POST /api/reset", s.handleReset)
 
 	api("POST /api/hosts", s.handleCreateHost)
+	api("POST /api/hosts/bulk", s.handleBulkCreateHosts)
 	api("PUT /api/hosts/{id}", s.handleUpdateHost)
 	api("DELETE /api/hosts/{id}", s.handleDeleteHost)
+
+	// Network discovery: find machines with SSH/telnet open, then add them.
+	api("POST /api/scan", s.handleScan)
 
 	api("POST /api/groups", s.handleCreateGroup)
 	api("PUT /api/groups/{id}", s.handleUpdateGroup)
@@ -214,6 +218,7 @@ func (s *Server) routes() {
 
 	api("POST /api/launch/terminal/{id}", s.handleLaunchTerminal)
 	api("POST /api/launch/files/{id}", s.handleLaunchFiles)
+	api("POST /api/launch/url/{id}", s.handleLaunchURL)
 
 	// Web SFTP browser.
 	api("GET /api/sftp/{id}/list", s.handleSftpList)
