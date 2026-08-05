@@ -2,26 +2,45 @@
 
 # webssh
 
-A **local web control panel** for managing lots of SSH connections. It is *not* a
-browser SSH gateway — it runs as a daemon on your own machine with your
-privileges, so it can edit `~/.ssh/config`, generate/deploy keys, mount remote
-directories over `sshfs`, and launch your native terminal / file manager. A
-browser-based terminal is included as a fallback for remote use.
+A **local web control panel** for managing lots of SSH connections — and the
+telnet boxes and web appliances that sit alongside them. It is *not* a browser
+SSH gateway — it runs as a daemon on your own machine with your privileges, so
+it can edit `~/.ssh/config`, generate/deploy keys, mount remote directories over
+`sshfs`, and launch your native terminal / file manager. A browser-based
+terminal is included as a fallback for remote use.
 
-## Features (v1)
+## Features
 
 - **Inventory** — hosts with groups (hierarchy: prod/staging, per-client), tags,
   and fuzzy search. Manual create/edit, `ProxyJump`/bastion, extra ssh options.
+- **Per-host services** — besides SSH, a host records optional telnet, Proxmox VE,
+  Proxmox Backup Server, HTTP and HTTPS ports. Its card shows only the buttons
+  that machine can answer, and an empty SSH port marks a host with no SSH at all —
+  a telnet-only switch, or an appliance you reach solely through its web UI.
+- **Network discovery** — **Scan** finds hosts on a single address
+  (`192.168.23.24`), a range (`192.168.1.2-32`) or a network (`192.168.1.0/24`),
+  probing 22, 23, 80, 443, 8006 and 8007, and adds the ones you pick in one
+  batch. **Rescan** on a card re-probes that host and opens its editor with the
+  ports it found.
 - **~/.ssh/config sync** — import existing config; export the inventory to a
   managed file `~/.ssh/config.d/inventory` wired in via a single `Include` line.
-  Your main config is backed up and never overwritten.
+  Your main config is backed up and never overwritten. Hosts with no SSH port
+  are left out of it.
 - **Keys** — generate keypairs (ed25519/rsa/ecdsa) and deploy public keys to
   hosts (`authorized_keys`) for passwordless access. Tracks what is deployed where.
+- **Known hosts** — import `~/.ssh/known_hosts`, paste entries or fetch them with
+  `ssh-keyscan`, and export them back.
 - **sshfs** — mount/unmount a host's home directory, open it in your file manager.
 - **Web SFTP browser** — browse the remote filesystem, download/upload, mkdir,
   rename, delete, in the browser (agent/key auth, or a one-shot web password prompt).
 - **Native launch** — configurable commands to open your terminal / file manager.
-- **Web terminal** — xterm.js session over a websocket (fallback to native apps).
+- **Web terminal** — xterm.js session over a websocket, speaking either SSH or
+  telnet. Telnet is implemented in-process, so no `telnet(1)` binary is needed;
+  Backspace defaults to Ctrl-H and toggles to DEL in the terminal bar.
+- **Health checks** — background probes colour each host green (its port is
+  open), yellow (answers ping only) or red (unreachable).
+- **Master password** — optional gate over the whole panel, plus encrypted
+  backup and restore of the inventory and keys.
 - **Quits with the browser** — each tab holds a presence websocket, and the
   daemon exits a few seconds after the last one closes, so it does not linger in
   the background. Reloading does not count; turn it off in Settings to keep it
@@ -35,7 +54,11 @@ The daemon is powerful, so it is locked down:
 - every request needs the **startup token** (printed as a URL); a `SameSite=Strict`
   cookie bootstraps it, and the SPA sends it as `X-Auth-Token`;
 - mutating requests must carry a **loopback Origin** (CSRF defense);
-- deploy passwords are used once and never stored.
+- deploy passwords are used once and never stored;
+- an optional **master password** gates every endpoint until you unlock;
+- scanning and health checks only **open a TCP connection and close it** — no
+  login is attempted, so nothing reaches the target's auth log, and one scan is
+  capped at 4096 addresses and 20000 probes.
 
 Do not expose it to the network.
 
@@ -152,14 +175,16 @@ commands are Linux ones, so it does not run there yet.
 ## Layout
 
 - `cmd/webssh` — entry point (flags, token, loopback bind).
-- `internal/{store,sshconfig,keys,mount,launcher,pty,server,config}` — backend.
+- `internal/` — backend: `store`, `config`, `server`, `sshconfig`, `keys`,
+  `knownhosts`, `mount`, `sftpbrowse`, `launcher`, `appwin`, `askpass`, `pty`,
+  `telnet` (built-in telnet client), `netscan` (port discovery), `health`,
+  `backup`.
 - `web/` — Svelte + Vite SPA, embedded into the binary via `web/embed.go`.
 - `assets/` — master `icon.svg` and the script that renders every raster size.
 - `packaging/` — `.desktop` template used by `make install-desktop`.
 - `winres/` — resource manifest for the Windows icon and version info.
 
-## Roadmap (v2)
+## Roadmap
 
-Port forwarding (local/remote/SOCKS) with a tunnel monitor, background
-health-checks, broadcast commands, `known_hosts` manager, encrypted secret
-storage, command palette, Ansible/PuTTY import.
+Port forwarding (local/remote/SOCKS) with a tunnel monitor, broadcast commands,
+command palette, Ansible/PuTTY import.
