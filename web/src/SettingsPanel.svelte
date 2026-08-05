@@ -242,6 +242,34 @@
       <input id="files" class="mono" bind:value={form.files_cmd} />
     </div>
     <div class="field">
+      <label for="termmode">Open terminal with</label>
+      <select id="termmode" bind:value={form.terminal_mode}>
+        <option value="both">Both buttons</option>
+        <option value="web">Web terminal only</option>
+        <option value="system">System terminal only</option>
+        <option value="off">Neither</option>
+      </select>
+      <span class="muted" style="font-size:12px">
+        Which terminal buttons a host card shows, so you can trim the ones you
+        never press. The Telnet button always stays — telnet is a service of its
+        own, with no native counterpart.
+      </span>
+    </div>
+    <div class="field">
+      <label for="filesmode">Open files with</label>
+      <select id="filesmode" bind:value={form.files_mode}>
+        <option value="both">Both buttons</option>
+        <option value="web">Web SFTP browser only</option>
+        <option value="system">System file manager only</option>
+        <option value="off">Neither</option>
+      </select>
+      <span class="muted" style="font-size:12px">
+        Mount/Unmount is shown with the system file manager, which is what the
+        sshfs mount serves. An existing mount stays put until you switch this
+        back or unmount from a shell.
+      </span>
+    </div>
+    <div class="field">
       <label for="uimode">Open the interface as</label>
       <select id="uimode" bind:value={form.ui_mode}>
         <option value="app">App window (no tabs or address bar)</option>

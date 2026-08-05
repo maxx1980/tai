@@ -22,6 +22,19 @@ const (
 	// SSH is unaffected: its PTY carries the real terminal settings.
 	KeyTelnetBackspace = "telnet_backspace"
 
+	// KeyTerminalMode selects which terminal buttons a host card offers: "web"
+	// (in-browser xterm.js), "system" (the native emulator from terminal_cmd),
+	// "both" (the default) or "off". Purely a UI preference — the launch
+	// endpoints stay available either way. The Telnet button is unaffected:
+	// telnet is a service of its own with no native counterpart.
+	KeyTerminalMode = "terminal_mode"
+
+	// KeyFilesMode selects which file buttons a host card offers: "web" (the
+	// SFTP browser), "system" (sshfs mount + the file manager from files_cmd),
+	// "both" (the default) or "off". Mount/Unmount follows "system", since the
+	// mount exists to serve the native file manager.
+	KeyFilesMode = "files_mode"
+
 	// KeyAuthDisabled ("1" = on) turns off the API-key check. Not a secret; the
 	// loopback bind and Origin check on mutations still apply.
 	KeyAuthDisabled = "auth_disabled"
@@ -57,6 +70,8 @@ func Defaults(home string) map[string]string {
 		KeyMountBaseDir:    filepath.Join(home, "mnt", "webssh"),
 		KeyTheme:           "system",
 		KeyTelnetBackspace: "bs",
+		KeyTerminalMode:    "both",
+		KeyFilesMode:       "both",
 		KeyAuthDisabled:    "",
 		KeyExitOnClose:     "1",
 		KeyUIMode:          "app",

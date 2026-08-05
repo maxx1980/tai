@@ -54,6 +54,17 @@
   const baseDir = $derived(app.settings.mount_base_dir ?? "");
   const mountedPoints = $derived(new Set(app.mounts.map((m) => m.mountpoint)));
 
+  // Which action buttons a card offers, from Settings → Applications. Anything
+  // other than the four known values falls back to showing both, so a missing
+  // or hand-edited setting never leaves a card with nothing on it.
+  const termMode = $derived(app.settings.terminal_mode ?? "both");
+  const filesMode = $derived(app.settings.files_mode ?? "both");
+  const showWebTerm = $derived(termMode !== "system" && termMode !== "off");
+  const showSysTerm = $derived(termMode !== "web" && termMode !== "off");
+  const showWebFiles = $derived(filesMode !== "system" && filesMode !== "off");
+  // Mount/Unmount rides with the native file manager: the sshfs mount serves it.
+  const showSysFiles = $derived(filesMode !== "web" && filesMode !== "off");
+
   function isMounted(h: Host): boolean {
     return mountedPoints.has(`${baseDir}/${h.alias}`);
   }
@@ -244,6 +255,18 @@
   // card with nothing configured can say so instead of showing an empty row.
   function hasAnyAction(h: Host): boolean {
     return Boolean(h.port || h.telnet_port || h.pve_port || h.pbs_port || h.http_port || h.https_port);
+  }
+
+  // hasVisibleAction reports whether anything survives the Settings →
+  // Applications filters, so a host with ports set cannot end up with a blank
+  // action row and no explanation for it.
+  function hasVisibleAction(h: Host): boolean {
+    const ssh =
+      Boolean(h.port) && (showWebTerm || showSysTerm || showWebFiles || showSysFiles);
+    return (
+      ssh ||
+      Boolean(h.telnet_port || h.pve_port || h.pbs_port || h.http_port || h.https_port)
+    );
   }
 
   // rescan probes one host for the services a card can act on and opens the
@@ -539,21 +562,31 @@
           <div class="row actions">
             <!-- SSH-backed actions only exist when the host has an SSH port. -->
             {#if h.port}
-              <button class="sm" disabled={busyId === h.id} onclick={() => onOpenTerminal(h, "ssh")}>
-                Web term
-              </button>
-              <button class="sm" disabled={busyId === h.id} onclick={() => launchTerminal(h)}>
-                Terminal
-              </button>
-              <button class="sm" disabled={busyId === h.id} onclick={() => openFiles(h)}>
-                Files
-              </button>
-              <button class="sm" disabled={busyId === h.id} onclick={() => onBrowse(h)}>
-                Browse
-              </button>
-              <button class="sm" disabled={busyId === h.id} onclick={() => toggleMount(h)}>
-                {isMounted(h) ? "Unmount" : "Mount"}
-              </button>
+              {#if showWebTerm}
+                <button class="sm" disabled={busyId === h.id} onclick={() => onOpenTerminal(h, "ssh")}>
+                  Web term
+                </button>
+              {/if}
+              {#if showSysTerm}
+                <button class="sm" disabled={busyId === h.id} onclick={() => launchTerminal(h)}>
+                  Terminal
+                </button>
+              {/if}
+              {#if showSysFiles}
+                <button class="sm" disabled={busyId === h.id} onclick={() => openFiles(h)}>
+                  Files
+                </button>
+              {/if}
+              {#if showWebFiles}
+                <button class="sm" disabled={busyId === h.id} onclick={() => onBrowse(h)}>
+                  Browse
+                </button>
+              {/if}
+              {#if showSysFiles}
+                <button class="sm" disabled={busyId === h.id} onclick={() => toggleMount(h)}>
+                  {isMounted(h) ? "Unmount" : "Mount"}
+                </button>
+              {/if}
             {/if}
             {#if h.telnet_port}
               <button
@@ -583,6 +616,10 @@
             {/if}
             {#if !hasAnyAction(h)}
               <span class="muted" style="font-size:12px">No ports set — use Rescan or Edit</span>
+            {:else if !hasVisibleAction(h)}
+              <span class="muted" style="font-size:12px">
+                Buttons hidden by Settings → Applications
+              </span>
             {/if}
           </div>
         </div>

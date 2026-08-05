@@ -37,6 +37,10 @@ terminal is included as a fallback for remote use.
 - **Web terminal** — xterm.js session over a websocket, speaking either SSH or
   telnet. Telnet is implemented in-process, so no `telnet(1)` binary is needed;
   Backspace defaults to Ctrl-H and toggles to DEL in the terminal bar.
+- **Fewer buttons per card** — Settings picks whether a host card offers the web
+  terminal, your system terminal, both or neither, and likewise the web SFTP
+  browser, your file manager (which carries Mount/Unmount) or neither. Telnet
+  always stays: it has no native counterpart.
 - **Health checks** — background probes colour each host green (its port is
   open), yellow (answers ping only) or red (unreachable).
 - **Master password** — optional gate over the whole panel, plus encrypted
