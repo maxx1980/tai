@@ -69,19 +69,26 @@ func main() {
 	distro := defaultDistro
 	if !wslutil.DistroReady(distro) {
 		distros := wslutil.Distros()
-		if len(distros) == 0 {
+		if len(distros) > 0 {
+			distro = distros[0]
+			fmt.Printf("Using existing distro '%s' instead of the default.\n", distro)
+		} else {
 			if !wslutil.IsElevated() {
 				requestElevationAndExit()
 				return
 			}
-			fmt.Printf("WSL is present but has no Linux distro yet. Installing %s...\n", defaultDistro)
+			fmt.Printf("WSL is present but has no Linux distro yet. Installing %s (this can take a few minutes)...\n", defaultDistro)
 			wslutil.InstallDistro(defaultDistro)
-			fmt.Println("Installed. Run this installer again to continue installing webssh.")
-			pause()
-			return
+			// Unlike the "WSL itself is missing" branch above, installing a
+			// distro needs no reboot — the platform is already active — so
+			// continue straight into installing webssh instead of making the
+			// user run this installer a second time for no reason.
+			if !wslutil.DistroReady(defaultDistro) {
+				fail(fmt.Sprintf(
+					"could not install %s. Try running 'wsl --install -d %s' yourself to see the actual error, then run this installer again.",
+					defaultDistro, defaultDistro))
+			}
 		}
-		distro = distros[0]
-		fmt.Printf("Using existing distro '%s' instead of the default.\n", distro)
 	}
 
 	fmt.Printf("WSL is ready (%s). Installing webssh inside it...\n", distro)
