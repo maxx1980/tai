@@ -92,10 +92,15 @@ func main() {
 	// Best-effort sshfs install (needed for the Files "system"/Mount button):
 	// wrapped in `|| true` so a non-apt distro or a flaky mirror never blocks
 	// the webssh install itself.
+	// TODO(windows-support): --version pins installs to the windows-setup-test
+	// prerelease, which is the only place the WSL-aware config.go defaults
+	// have been published so far (the real "latest" release predates this
+	// branch). Drop this pin once windows-support merges to main and a real
+	// release carries the fix.
 	installCmd := fmt.Sprintf(
 		"(command -v apt-get >/dev/null 2>&1 && apt-get update -qq && "+
 			"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sshfs || true) && "+
-			"curl -fsSL %s | bash",
+			"curl -fsSL %s | bash -s -- --version windows-setup-test",
 		getShURL)
 	if err := wslutil.RunChecked("wsl.exe", "-d", distro, "-u", "root", "--", "bash", "-lc", installCmd); err != nil {
 		fail(fmt.Sprintf("webssh install failed inside WSL: %v", err))
