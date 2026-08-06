@@ -81,27 +81,13 @@ func Defaults(home string) map[string]string {
 		if distro == "" {
 			distro = "Ubuntu"
 		}
-		// Prefer PowerShell's window (stays open after ssh exits, nicer to work
-		// in) and fall back to the classic console host if powershell.exe is
-		// ever missing (locked-down images, etc). Both are plain Win32 console
-		// apps, so launching either directly from a console-less WSL process
-		// gives it a fresh window with no wrapper needed — cmd.exe's own `start`
-		// is only there to give the fallback the same "own window" behavior.
-		//
-		// Deliberately unquoted after -Command/start: WSL interop rebuilds a
-		// Win32 command line from the argv it hands the target .exe, and does
-		// not reliably preserve a single argument that itself contains spaces
-		// — both a quoted -Command "wsl.exe -d Ubuntu ... ssh {{alias}}" and a
-		// base64 -EncodedCommand of it arrived at PowerShell mangled, confirmed
-		// live on real WSL. Every token below is one argv element with no
-		// internal spaces, so nothing needs quoting in the first place; -Command
-		// in "string" mode already glues all its trailing args back together
-		// (same as ping/notepad.exe examples in `powershell -?`), and cmd.exe's
-		// `start` does the same for the fallback.
-		wslSSH := "wsl.exe -d " + distro + " -u root -- ssh {{alias}}"
-		terminalCmd = "bash -c 'command -v powershell.exe >/dev/null 2>&1 && " +
-			"exec powershell.exe -NoExit -Command " + wslSSH + " || " +
-			"exec cmd.exe /c start " + wslSSH + "'"
+		// PowerShell was tried and dropped: WSL interop kept mangling any
+		// single argument containing spaces (quoted -Command, even a base64
+		// -EncodedCommand), confirmed live on real WSL/Windows. Plain cmd.exe
+		// with `start` needs no such argument — every token below is its own
+		// space-free argv element — and is the version that was actually
+		// confirmed working end to end.
+		terminalCmd = "cmd.exe /c start wsl.exe -d " + distro + " -u root -- ssh {{alias}}"
 		filesCmd = `bash -c 'explorer.exe "$(wslpath -w {{mountpoint}})"'`
 	}
 	return map[string]string{
