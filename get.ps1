@@ -127,7 +127,7 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host ""
 Write-Host "webssh is installed inside WSL ($Distro). To start it:"
-Write-Host "  wsl -d $Distro -u root -- webssh --no-open"
+Write-Host "  wsl -d $Distro -u root -- /root/.local/bin/webssh --no-open"
 Write-Host ""
 Write-Host "--no-open matters here: webssh's default 'app' mode looks for a"
 Write-Host "chromium-based browser to open, and a bare WSL distro has none —"
@@ -137,5 +137,5 @@ Write-Host "http://127.0.0.1:8022/?token=..., open it in whatever browser"
 Write-Host "you already have on Windows."
 
 if ($Run) {
-    & wsl.exe -d $Distro -u root -- webssh --no-open
+    & wsl.exe -d $Distro -u root -- /root/.local/bin/webssh --no-open
 }
