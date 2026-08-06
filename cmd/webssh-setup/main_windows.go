@@ -20,6 +20,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"webssh/internal/wslutil"
 )
@@ -147,6 +148,12 @@ func createShortcut(shortcutPath, target string) error {
 		psQuote(shortcutPath), psQuote(target), psQuote(target+",0"), psQuote("webssh - local SSH control panel"),
 	)
 	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
+	// Belt-and-braces: this process has a console of its own, so its child
+	// shouldn't need a second one, but its I/O is fully redirected either way
+	// (CombinedOutput), which is exactly the condition under which a stray
+	// console window has been seen to flash briefly for some Windows/console
+	// host combinations.
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(out))

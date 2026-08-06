@@ -45,6 +45,10 @@ func main() {
 	}
 
 	cmd := exec.Command("wsl.exe", "-d", distro, "-u", "root", "--", "/root/.local/bin/webssh", "--no-open")
+	// This process has no console of its own (-H=windowsgui); without
+	// HideWindow, Windows would give its console-subsystem child (wsl.exe)
+	// a brand new console window to make up for that.
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		showError("could not start webssh: " + err.Error())
