@@ -81,7 +81,16 @@ func Defaults(home string) map[string]string {
 		if distro == "" {
 			distro = "Ubuntu"
 		}
-		terminalCmd = "cmd.exe /c start wsl.exe -d " + distro + " -u root -- ssh {{alias}}"
+		// Prefer PowerShell's window (stays open after ssh exits, nicer to work
+		// in) and fall back to the classic console host if powershell.exe is
+		// ever missing (locked-down images, etc). Both are plain Win32 console
+		// apps, so launching either directly from a console-less WSL process
+		// gives it a fresh window with no wrapper needed — cmd.exe's own `start`
+		// is only there to give the fallback the same "own window" behavior.
+		wslSSH := "wsl.exe -d " + distro + " -u root -- ssh {{alias}}"
+		terminalCmd = "bash -c 'command -v powershell.exe >/dev/null 2>&1 && " +
+			`exec powershell.exe -NoExit -Command "` + wslSSH + `" || ` +
+			"exec cmd.exe /c start " + wslSSH + "'"
 		filesCmd = `bash -c 'explorer.exe "$(wslpath -w {{mountpoint}})"'`
 	}
 	return map[string]string{
