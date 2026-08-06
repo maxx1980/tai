@@ -69,7 +69,11 @@ func main() {
 		return
 	}
 
-	_ = exec.Command("explorer.exe", url).Start()
+	// Same mechanism internal/appwin/browser.go already uses for the native
+	// Windows fallback - rundll32 reliably reaches the registered browser;
+	// explorer.exe with a URL argument does not (it can just open a File
+	// Explorer window instead, depending on the Windows build).
+	_ = exec.Command("rundll32.exe", "url.dll,FileProtocolHandler", url).Start()
 
 	// Stay alive (invisibly - there's no console) for as long as webssh runs,
 	// so its stdout/stderr pipes stay open instead of breaking mid-write.
