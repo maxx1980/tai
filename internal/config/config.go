@@ -87,9 +87,19 @@ func Defaults(home string) map[string]string {
 		// apps, so launching either directly from a console-less WSL process
 		// gives it a fresh window with no wrapper needed — cmd.exe's own `start`
 		// is only there to give the fallback the same "own window" behavior.
+		//
+		// -EncodedCommand rather than -Command: WSL interop rebuilds a Win32
+		// command line from the argv it hands the target .exe, and does not
+		// reliably re-quote an argument that itself contains spaces — a plain
+		// -Command "wsl.exe -d Ubuntu ... ssh {{alias}}" arrives at PowerShell
+		// with the quoted argument dropped entirely ("Command must follow the
+		// -Command parameter"), confirmed live. Base64 of UTF-16LE has no
+		// whitespace or shell metacharacters, so nothing downstream can mangle
+		// it. cmd.exe's fallback keeps plain args since `start` never showed
+		// this problem.
 		wslSSH := "wsl.exe -d " + distro + " -u root -- ssh {{alias}}"
-		terminalCmd = "bash -c 'command -v powershell.exe >/dev/null 2>&1 && " +
-			`exec powershell.exe -NoExit -Command "` + wslSSH + `" || ` +
+		terminalCmd = "bash -c 'enc=$(printf %s \"" + wslSSH + "\" | iconv -t UTF-16LE | base64 -w0); " +
+			"command -v powershell.exe >/dev/null 2>&1 && exec powershell.exe -NoExit -EncodedCommand \"$enc\" || " +
 			"exec cmd.exe /c start " + wslSSH + "'"
 		filesCmd = `bash -c 'explorer.exe "$(wslpath -w {{mountpoint}})"'`
 	}
