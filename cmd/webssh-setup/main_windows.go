@@ -97,9 +97,15 @@ func main() {
 	// have been published so far (the real "latest" release predates this
 	// branch). Drop this pin once windows-support merges to main and a real
 	// release carries the fix.
+	// user_allow_other lets a non-root caller (which is how \\wsl$\ may reach
+	// the distro) use sshfs's -o allow_other; root itself doesn't need this,
+	// but it costs nothing to enable and removes one variable when \\wsl$\
+	// shows a mount as empty.
 	installCmd := fmt.Sprintf(
 		"(command -v apt-get >/dev/null 2>&1 && apt-get update -qq && "+
 			"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sshfs || true) && "+
+			"(grep -q '^user_allow_other' /etc/fuse.conf 2>/dev/null || "+
+			"echo user_allow_other >> /etc/fuse.conf) && "+
 			"curl -fsSL %s | bash -s -- --version windows-setup-test",
 		getShURL)
 	if err := wslutil.RunChecked("wsl.exe", "-d", distro, "-u", "root", "--", "bash", "-lc", installCmd); err != nil {
