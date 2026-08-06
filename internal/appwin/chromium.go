@@ -20,12 +20,18 @@ var chromiumNames = []string{
 }
 
 // chromiumPaths cover installs that ship a .desktop file but never land on
-// PATH, which is how Chrome and Edge package themselves on Debian.
+// PATH, which is how Chrome and Edge package themselves on Debian — plus the
+// macOS .app bundle executables, which are never on PATH at all.
 var chromiumPaths = []string{
 	"/opt/google/chrome/google-chrome",
 	"/opt/microsoft/msedge/microsoft-edge",
 	"/opt/brave.com/brave/brave-browser",
 	"/opt/vivaldi/vivaldi",
+	"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+	"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+	"/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+	"/Applications/Vivaldi.app/Contents/MacOS/Vivaldi",
+	"/Applications/Chromium.app/Contents/MacOS/Chromium",
 }
 
 // isExecutableFile reports whether p is a runnable file (not a directory).
