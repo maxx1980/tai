@@ -3,13 +3,14 @@
 // Command webssh-setup is a native double-click installer for Windows: it
 // gets WSL and a Linux distro ready (installing whichever is missing,
 // self-elevating via UAC only when that's actually needed), runs the normal
-// get.sh installer inside that distro, then installs webssh-launcher.exe
-// (embedded below) and points a Desktop and Start Menu shortcut at it, so
-// the app is reachable like any other installed program from then on. It
-// exists because webssh has no native Windows build yet — internal/pty has
-// no ConPTY backend, so the web terminal cannot start a shell outside WSL —
-// and because get.bat/get.ps1 need a console and, on a stock system, fight
-// PowerShell's script ExecutionPolicy. A compiled .exe sidesteps both.
+// get.sh installer inside that distro, then installs webssh-launcher.exe and
+// webssh-uninstall.exe (both embedded below), points a Desktop and Start
+// Menu shortcut at the launcher, and registers webssh under Settings > Apps
+// so it has a working Uninstall button there too. It exists because webssh
+// has no native Windows build yet — internal/pty has no ConPTY backend, so
+// the web terminal cannot start a shell outside WSL — and because
+// get.bat/get.ps1 need a console and, on a stock system, fight PowerShell's
+// script ExecutionPolicy. A compiled .exe sidesteps both.
 package main
 
 import (
@@ -19,20 +20,24 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"syscall"
+	"unsafe"
 
+	"webssh/internal/version"
+	"webssh/internal/wininstall"
 	"webssh/internal/wslutil"
 )
 
 const (
 	defaultDistro = "Ubuntu"
 	getShURL      = "https://raw.githubusercontent.com/maxx1980/tai/main/get.sh"
-	appName       = "webssh"
 )
 
 //go:embed assets/webssh-launcher.exe
 var launcherExe []byte
+
+//go:embed assets/webssh-uninstall.exe
+var uninstallExe []byte
 
 func main() {
 	fmt.Println("webssh installer for Windows (via WSL)")
@@ -49,9 +54,11 @@ func main() {
 		}
 		fmt.Printf("Installing WSL and %s (this can take a few minutes)...\n", defaultDistro)
 		wslutil.InstallDistro(defaultDistro)
+		const msg = "WSL was just installed. Windows needs a reboot before it can run it.\n\n" +
+			"After you reboot, run this installer again to finish installing webssh."
 		fmt.Println()
-		fmt.Println("WSL was just installed. Windows usually needs a reboot before it can run it.")
-		fmt.Println("Reboot, then run this installer again to finish installing webssh.")
+		fmt.Println(msg)
+		showInfo(msg)
 		pause()
 		return
 	}
@@ -88,17 +95,22 @@ func main() {
 	}
 
 	fmt.Println()
-	fmt.Println("Setting up the Desktop/Start Menu shortcut...")
-	launcherPath, err := installLauncher()
+	fmt.Println("Setting up the shortcut and Windows registration...")
+	launcherPath, uninstallerPath, err := installFiles()
 	if err != nil {
-		fail(fmt.Sprintf("could not install the launcher: %v", err))
+		fail(fmt.Sprintf("could not install the launcher/uninstaller: %v", err))
 	}
-	if err := createShortcuts(launcherPath); err != nil {
+	if err := wininstall.CreateShortcuts(launcherPath); err != nil {
 		// Not fatal - webssh is fully installed either way, and the manual
 		// start command below still works.
 		fmt.Printf("Warning: could not create shortcuts: %v\n", err)
 	} else {
 		fmt.Println("Added a 'webssh' shortcut to your Desktop and Start Menu.")
+	}
+	if err := wininstall.RegisterUninstall(uninstallerPath, launcherPath, version.Version); err != nil {
+		fmt.Printf("Warning: could not register webssh under Settings > Apps: %v\n", err)
+	} else {
+		fmt.Println("Registered webssh under Settings > Apps, with a working Uninstall button.")
 	}
 
 	fmt.Println()
@@ -109,69 +121,24 @@ func main() {
 	_ = exec.Command(launcherPath).Start()
 }
 
-// installLauncher writes the embedded webssh-launcher.exe to a stable,
-// permanent location - it can't stay wherever webssh-setup.exe was
-// downloaded to (e.g. Downloads), since a shortcut needs a path that lasts.
-func installLauncher() (string, error) {
-	dir := filepath.Join(os.Getenv("LOCALAPPDATA"), appName)
+// installFiles writes the embedded webssh-launcher.exe and webssh-uninstall.exe
+// to a stable, permanent location - they can't stay wherever webssh-setup.exe
+// was downloaded to (e.g. Downloads), since the shortcut and the Settings >
+// Apps entry both need paths that last.
+func installFiles() (launcherPath, uninstallerPath string, err error) {
+	dir := wininstall.Dir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
+		return "", "", err
 	}
-	path := filepath.Join(dir, "webssh-launcher.exe")
-	if err := os.WriteFile(path, launcherExe, 0o755); err != nil {
-		return "", err
+	launcherPath = filepath.Join(dir, "webssh-launcher.exe")
+	if err := os.WriteFile(launcherPath, launcherExe, 0o755); err != nil {
+		return "", "", err
 	}
-	return path, nil
-}
-
-// createShortcuts creates a Desktop and Start Menu .lnk pointing at target,
-// via the decades-old WScript.Shell COM approach - there's no Win32 API for
-// this that doesn't mean writing the Shell Link binary format by hand, and
-// this one-liner is about as well-trodden as Windows scripting gets.
-func createShortcuts(target string) error {
-	locations := []string{
-		filepath.Join(os.Getenv("USERPROFILE"), "Desktop", appName+".lnk"),
-		filepath.Join(os.Getenv("APPDATA"), "Microsoft", "Windows", "Start Menu", "Programs", appName+".lnk"),
+	uninstallerPath = filepath.Join(dir, "webssh-uninstall.exe")
+	if err := os.WriteFile(uninstallerPath, uninstallExe, 0o755); err != nil {
+		return "", "", err
 	}
-	var firstErr error
-	for _, path := range locations {
-		if err := createShortcut(path, target); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	return firstErr
-}
-
-func createShortcut(shortcutPath, target string) error {
-	script := fmt.Sprintf(
-		`$sh = New-Object -ComObject WScript.Shell; $s = $sh.CreateShortcut(%s); $s.TargetPath = %s; $s.IconLocation = %s; $s.Description = %s; $s.Save()`,
-		psQuote(shortcutPath), psQuote(target), psQuote(target+",0"), psQuote("webssh - local SSH control panel"),
-	)
-	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
-	// Belt-and-braces: this process has a console of its own, so its child
-	// shouldn't need a second one, but its I/O is fully redirected either way
-	// (CombinedOutput), which is exactly the condition under which a stray
-	// console window has been seen to flash briefly for some Windows/console
-	// host combinations.
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		msg := strings.TrimSpace(string(out))
-		if msg != "" {
-			return fmt.Errorf("%s: %w", msg, err)
-		}
-		return err
-	}
-	return nil
-}
-
-// psQuote wraps s in single quotes for a PowerShell command line. Single
-// quotes are used deliberately: PowerShell does no escape processing inside
-// them (unlike double quotes, where a literal backslash - unavoidable in any
-// Windows path - would need its own escaping rules), so the only character
-// that needs handling is a literal single quote, doubled per PowerShell's rule.
-func psQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+	return launcherPath, uninstallerPath, nil
 }
 
 func requestElevationAndExit() {
@@ -195,4 +162,19 @@ func pause() {
 	fmt.Println()
 	fmt.Print("Press Enter to close this window...")
 	bufio.NewReader(os.Stdin).ReadString('\n')
+}
+
+var (
+	user32          = syscall.NewLazyDLL("user32.dll")
+	procMessageBoxW = user32.NewProc("MessageBoxW")
+)
+
+// showInfo pops up a message box in addition to the console text above it -
+// a reboot requirement is easy to miss in scrolling console output (or if
+// the window is closed before it's read), and this needs to actually stick.
+func showInfo(msg string) {
+	title, _ := syscall.UTF16PtrFromString("webssh")
+	text, _ := syscall.UTF16PtrFromString(msg)
+	const mbIconInformation = 0x40
+	procMessageBoxW.Call(0, uintptr(unsafe.Pointer(text)), uintptr(unsafe.Pointer(title)), mbIconInformation)
 }

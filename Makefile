@@ -1,4 +1,4 @@
-.PHONY: all ui build build-webview run clean deps dev icons syso build-windows setup-syso build-windows-setup launcher-syso build-windows-launcher install-desktop uninstall-desktop dist dist-all
+.PHONY: all ui build build-webview run clean deps dev icons syso build-windows setup-syso build-windows-setup launcher-syso build-windows-launcher uninstall-syso build-windows-uninstall install-desktop uninstall-desktop dist dist-all
 
 BINARY := webssh
 # VERSION is stamped into the binary so the updater can compare it with the
@@ -58,18 +58,30 @@ launcher-syso: icons
 build-windows-launcher: launcher-syso
 	GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui $(LDFLAGS)" -o webssh-launcher.exe ./cmd/webssh-launcher
 
+# uninstall-syso/build-windows-uninstall build webssh-uninstall.exe: what
+# webssh-setup registers as the Settings > Apps Uninstall button target. It
+# removes the shortcuts, that registration, and (with -purge) webssh itself
+# from inside WSL via get.sh --uninstall.
+uninstall-syso: icons
+	$(WINRES) make --arch amd64 --in winres/winres-uninstall.json --out cmd/webssh-uninstall/rsrc
+
+build-windows-uninstall: uninstall-syso
+	GOOS=windows GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o webssh-uninstall.exe ./cmd/webssh-uninstall
+
 # setup-syso/build-windows-setup build webssh-setup.exe: a double-click
 # installer that gets WSL and a distro ready, runs get.sh inside them, then
-# embeds and installs webssh-launcher.exe and points a shortcut at it - for
+# embeds and installs webssh-launcher.exe/webssh-uninstall.exe, points a
+# shortcut at the launcher, and registers webssh under Settings > Apps - for
 # people who don't want to open PowerShell or fight its ExecutionPolicy. Pure
-# Go (no cgo), same as build-windows. build-windows-launcher must run first:
-# the embed directive in cmd/webssh-setup needs the launcher binary on disk.
+# Go (no cgo), same as build-windows. build-windows-launcher/-uninstall must
+# run first: the embed directives in cmd/webssh-setup need both binaries on disk.
 setup-syso: icons
 	$(WINRES) make --arch amd64 --in winres/winres-setup.json --out cmd/webssh-setup/rsrc
 
-build-windows-setup: build-windows-launcher setup-syso
+build-windows-setup: build-windows-launcher build-windows-uninstall setup-syso
 	mkdir -p cmd/webssh-setup/assets
 	cp webssh-launcher.exe cmd/webssh-setup/assets/webssh-launcher.exe
+	cp webssh-uninstall.exe cmd/webssh-setup/assets/webssh-uninstall.exe
 	GOOS=windows GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o webssh-setup.exe ./cmd/webssh-setup
 
 # dist packs a release archive: the binary plus the icons and .desktop template
@@ -132,7 +144,7 @@ uninstall-desktop:
 	-update-desktop-database $(DESKTOP_DIR)
 
 clean:
-	rm -f $(BINARY) $(BINARY).exe webssh-setup.exe webssh-launcher.exe \
-		cmd/webssh/*.syso cmd/webssh-setup/*.syso cmd/webssh-launcher/*.syso \
-		cmd/webssh-setup/assets/webssh-launcher.exe
+	rm -f $(BINARY) $(BINARY).exe webssh-setup.exe webssh-launcher.exe webssh-uninstall.exe \
+		cmd/webssh/*.syso cmd/webssh-setup/*.syso cmd/webssh-launcher/*.syso cmd/webssh-uninstall/*.syso \
+		cmd/webssh-setup/assets/webssh-launcher.exe cmd/webssh-setup/assets/webssh-uninstall.exe
 	rm -rf web/dist web/node_modules assets/png $(DIST_DIR)
