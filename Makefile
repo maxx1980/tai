@@ -1,4 +1,4 @@
-.PHONY: all ui build build-webview run clean deps dev icons syso build-windows setup-syso build-windows-setup launcher-syso build-windows-launcher uninstall-syso build-windows-uninstall install-desktop uninstall-desktop dist dist-all
+.PHONY: all ui build build-webview run clean deps dev icons syso build-windows setup-syso build-windows-setup launcher-syso build-windows-launcher uninstall-syso build-windows-uninstall install-desktop uninstall-desktop dist dist-windows dist-all
 
 BINARY := webssh
 # VERSION is stamped into the binary so the updater can compare it with the
@@ -105,12 +105,27 @@ dist: ui
 	cd $(DIST_DIR) && sha256sum *.tar.gz > SHA256SUMS
 	@echo "==> $(DIST_DIR)/$(DIST_NAME).tar.gz"
 
-# dist-all builds every architecture a release publishes. The SHA256SUMS the
-# last run writes covers all of them, which is what get.sh verifies against.
+# dist-windows builds webssh-setup.exe (which embeds webssh-launcher.exe and
+# webssh-uninstall.exe - nothing else needs publishing separately) and copies
+# it into the release directory under a versioned name. get.sh never reads
+# it - Windows installs go through get.ps1/get.bat/webssh-setup.exe, never
+# get.sh directly - it just rides along in the same release as the Linux
+# archives.
+dist-windows: build-windows-setup
+	mkdir -p $(DIST_DIR)
+	cp webssh-setup.exe $(DIST_DIR)/$(BINARY)-setup-$(VERSION).exe
+	cd $(DIST_DIR) && sha256sum *.tar.gz *.exe > SHA256SUMS
+	@echo "==> $(DIST_DIR)/$(BINARY)-setup-$(VERSION).exe"
+
+# dist-all builds every platform a release publishes. The SHA256SUMS the last
+# run writes covers all of them, which is what get.sh verifies against (for
+# the Linux archives; webssh-setup.exe carries its own verification story by
+# virtue of being downloaded straight from a GitHub release URL).
 dist-all:
 	rm -rf $(DIST_DIR)
 	$(MAKE) dist ARCH=amd64
 	$(MAKE) dist ARCH=arm64
+	$(MAKE) dist-windows
 	@echo
 	@cat $(DIST_DIR)/SHA256SUMS
 

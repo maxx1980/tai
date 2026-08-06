@@ -108,27 +108,45 @@ does not care about your libc, and it covers the `browser` and `app` modes; the
 native `webview` window needs cgo and webkit at build time and is source-only.
 
 Windows has no working native build yet — `internal/pty` has no real ConPTY
-backend, so the web terminal cannot start a shell. Until that lands, run it
-under **WSL** instead: install a distro (`wsl --install`), then run the same
-one-liner inside it. Everything — the pty, sshfs, ping, the install script —
-is plain Linux there, so nothing in this README changes; run with `--no-open`
-though, since a bare WSL distro has no browser for the default `app` mode to
-find (and you don't need to install one there) — just open the printed
-`http://127.0.0.1:8022/?token=…` URL in whatever browser you already have on
-Windows; WSL2 forwards localhost to it automatically.
+backend, so the web terminal cannot start a shell. Until that lands, webssh
+runs inside **WSL** instead, driven from the Windows side by three small
+native helpers built from `cmd/webssh-setup`, `cmd/webssh-launcher` and
+`cmd/webssh-uninstall` (pure Go, no cgo — same as the Linux/macOS binaries):
 
-`get.ps1` automates that: it checks whether WSL and a distro are present,
-installs whichever is missing (asking to be re-run after a reboot if Windows
-needs one), then runs `get.sh` inside it. Installing WSL for the first time
-needs administrator rights; webssh itself does not, afterwards.
+Download `webssh-setup.exe` from the [releases page](https://github.com/maxx1980/tai/releases)
+and double-click it. It installs WSL and a distro if either is missing
+(asking for administrator rights through the normal UAC prompt only for
+that step, and telling you — in a message box, not just console text easy to
+miss — to reboot and run it again if Windows needs one first), installs
+webssh inside via `get.sh`, then adds a **webssh** shortcut to your Desktop
+and Start Menu and registers it under **Settings → Apps** with a working
+Uninstall button. From then on, the shortcut is all you need: it starts
+webssh inside WSL, reads the URL it prints, and opens it — in a chromeless
+app window when a chromium-based browser is findable (Edge ships inbox with
+every modern Windows install, so this is almost always the case), your
+regular browser otherwise.
 
-Download and double-click [`get.bat`](https://raw.githubusercontent.com/maxx1980/tai/main/get.bat) to run it without opening
-PowerShell yourself — it requests elevation through the normal UAC prompt only
-when WSL still needs installing. Or, from PowerShell directly:
+Uninstalling (Settings → Apps → webssh → Uninstall, or running
+`webssh-uninstall.exe` from `%LOCALAPPDATA%\webssh` directly) removes the
+shortcuts and that registration; it leaves webssh and your data inside WSL
+alone unless you pass `-purge`, which also runs `get.sh --uninstall` there —
+same as the *Rollback* bullet under Features above, it removes the binary
+but always leaves your inventory and keys in place.
+
+Prefer to read a script before running it, or already have WSL and a distro
+set up the way you want? `get.ps1`/`get.bat` do the same install step (not
+the shortcut/uninstaller registration) more transparently — see
+[`get.ps1`](https://raw.githubusercontent.com/maxx1980/tai/main/get.ps1) and
+[`get.bat`](https://raw.githubusercontent.com/maxx1980/tai/main/get.bat), or:
 
 ```powershell
 irm https://raw.githubusercontent.com/maxx1980/tai/main/get.ps1 | iex
 ```
+
+Either way, everything running inside WSL is plain Linux — the pty, sshfs,
+ping — so nothing else in this README changes; WSL2 forwards `127.0.0.1` to
+Windows automatically, which is what lets the token URL open directly in a
+Windows browser without anything extra installed inside the distro.
 
 Re-running the one-liner upgrades in place — it is also what the Update tab
 tells a prebuilt install to do, since there is no checkout there to rebuild.
@@ -236,14 +254,18 @@ removed with `get.sh --uninstall`.)
 
 ```sh
 make dist              # one archive for this machine's architecture
-make dist-all          # amd64 + arm64 + SHA256SUMS covering both
+make dist-windows      # webssh-setup.exe, versioned
+make dist-all          # amd64 + arm64 + webssh-setup.exe + SHA256SUMS covering all of it
 ```
 
-Each archive is `dist/webssh-<tag>-linux-<arch>.tar.gz` and holds the binary,
-the icons, the `.desktop` template and `get.sh` itself, which is what makes it
-installable offline. Publishing a release means tagging, running `make dist-all`
-on a clean checkout of that tag, and attaching both archives **and**
-`SHA256SUMS` — `get.sh` refuses to install without the checksums file.
+Each Linux archive is `dist/webssh-<tag>-linux-<arch>.tar.gz` and holds the
+binary, the icons, the `.desktop` template and `get.sh` itself, which is what
+makes it installable offline; `dist-windows` instead produces one file,
+`dist/webssh-setup-<tag>.exe` (`webssh-launcher.exe`/`webssh-uninstall.exe`
+are embedded inside it, not published separately). Publishing a release means
+tagging, running `make dist-all` on a clean checkout of that tag, and
+attaching every archive, the `.exe`, **and** `SHA256SUMS` — `get.sh` refuses
+to install without the checksums file.
 
 ## Icons
 
@@ -255,29 +277,37 @@ An ELF binary cannot carry an icon, which is why Linux gets a `.desktop` entry
 instead. Windows can, via a PE resource:
 
 ```sh
-make build-windows    # go-winres builds the .syso, then GOOS=windows go build
+make build-windows            # go-winres builds the .syso, then GOOS=windows go build
+make build-windows-setup      # webssh-setup.exe (embeds the two below)
+make build-windows-launcher   # webssh-launcher.exe on its own
+make build-windows-uninstall  # webssh-uninstall.exe on its own
 ```
 
-That produces `webssh.exe` with the icon and version info embedded. Note it only
-*builds* — the pty layer is a stub on Windows and the default terminal/mount
-commands are Linux ones, so it does not run there yet. Run it under WSL
-instead (see [Install](#install-prebuilt-binary)) until a real ConPTY backend
-lands.
+`build-windows` produces `webssh.exe` with the icon and version info
+embedded. Note it only *builds* — the pty layer is a stub on Windows and the
+default terminal/mount commands are Linux ones, so it does not run there
+yet. `build-windows-setup`/`-launcher`/`-uninstall` are the three Windows
+helpers described under [Install](#install-prebuilt-binary) that run webssh
+inside WSL instead, until a real ConPTY backend lands.
 
 ## Layout
 
 - `cmd/webssh` — entry point (flags, token, loopback bind).
+- `cmd/webssh-setup`, `cmd/webssh-launcher`, `cmd/webssh-uninstall` —
+  Windows-only (see [Install](#install-prebuilt-binary)): install WSL/webssh
+  and register a shortcut, start webssh in WSL and open it, and remove both.
 - `internal/` — backend: `store`, `config`, `server`, `sshconfig`, `keys`,
   `knownhosts`, `mount`, `sftpbrowse`, `launcher`, `appwin`, `askpass`, `pty`,
   `telnet` (built-in telnet client), `netscan` (port discovery), `health`,
-  `backup`.
+  `backup`, `wslutil`/`wininstall` (Windows-only, shared by the three above).
 - `web/` — Svelte + Vite SPA, embedded into the binary via `web/embed.go`.
 - `assets/` — master `icon.svg` and the script that renders every raster size.
 - `packaging/` — `.desktop` template used by `make install-desktop` and `get.sh`.
 - `get.sh` — the one-line installer for a prebuilt release (also removes it).
 - `get.ps1` — Windows installer: sets up WSL and a distro, then runs `get.sh` in it.
 - `get.bat` — double-click launcher for `get.ps1`, self-elevating via UAC when needed.
-- `winres/` — resource manifest for the Windows icon and version info.
+- `winres/` — resource manifests for the Windows icon and version info, one
+  per `.exe`.
 
 ## Roadmap
 
