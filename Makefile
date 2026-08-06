@@ -1,4 +1,4 @@
-.PHONY: all ui build build-webview run clean deps dev icons syso build-windows install-desktop uninstall-desktop dist dist-all
+.PHONY: all ui build build-webview run clean deps dev icons syso build-windows install-desktop uninstall-desktop dist dist-darwin dist-all
 
 BINARY := webssh
 # VERSION is stamped into the binary so the updater can compare it with the
@@ -68,12 +68,33 @@ dist: ui
 	cd $(DIST_DIR) && sha256sum *.tar.gz > SHA256SUMS
 	@echo "==> $(DIST_DIR)/$(DIST_NAME).tar.gz"
 
-# dist-all builds every architecture a release publishes. The SHA256SUMS the
-# last run writes covers all of them, which is what get.sh verifies against.
+# dist-darwin cross-builds a macOS archive — same idea as dist (no cgo, so no
+# webview mode there either), but there is no .desktop file on macOS: get.sh
+# installs the binary and icons only, skipping application-menu registration.
+dist-darwin: ui
+	rm -rf $(DIST_DIR)/$(BINARY)-$(VERSION)-darwin-$(ARCH)
+	mkdir -p $(DIST_DIR)/$(BINARY)-$(VERSION)-darwin-$(ARCH)/icons
+	CGO_ENABLED=0 GOOS=darwin GOARCH=$(ARCH) \
+		go build -trimpath -ldflags "-s -w $(LDFLAGS)" -o $(DIST_DIR)/$(BINARY)-$(VERSION)-darwin-$(ARCH)/$(BINARY) ./cmd/webssh
+	for n in $(ICON_SIZES); do \
+		install -m644 assets/png/icon-$$n.png $(DIST_DIR)/$(BINARY)-$(VERSION)-darwin-$(ARCH)/icons/$(BINARY)-$$n.png; \
+	done
+	install -m644 assets/icon.svg $(DIST_DIR)/$(BINARY)-$(VERSION)-darwin-$(ARCH)/icons/$(BINARY).svg
+	install -m755 get.sh $(DIST_DIR)/$(BINARY)-$(VERSION)-darwin-$(ARCH)/get.sh
+	tar -czf $(DIST_DIR)/$(BINARY)-$(VERSION)-darwin-$(ARCH).tar.gz -C $(DIST_DIR) $(BINARY)-$(VERSION)-darwin-$(ARCH)
+	rm -rf $(DIST_DIR)/$(BINARY)-$(VERSION)-darwin-$(ARCH)
+	cd $(DIST_DIR) && sha256sum *.tar.gz > SHA256SUMS
+	@echo "==> $(DIST_DIR)/$(BINARY)-$(VERSION)-darwin-$(ARCH).tar.gz"
+
+# dist-all builds every platform/architecture a release publishes. The
+# SHA256SUMS the last run writes covers everything present, which is what
+# get.sh verifies against.
 dist-all:
 	rm -rf $(DIST_DIR)
 	$(MAKE) dist ARCH=amd64
 	$(MAKE) dist ARCH=arm64
+	$(MAKE) dist-darwin ARCH=amd64
+	$(MAKE) dist-darwin ARCH=arm64
 	@echo
 	@cat $(DIST_DIR)/SHA256SUMS
 

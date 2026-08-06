@@ -103,9 +103,15 @@ Options go after `-s --`, because the script is being piped into bash:
 ... | bash -s -- --uninstall         # remove binary, icons and launcher
 ```
 
-Linux x86-64 and arm64. The release binary is static (`CGO_ENABLED=0`), so it
-does not care about your libc, and it covers the `browser` and `app` modes; the
-native `webview` window needs cgo and webkit at build time and is source-only.
+Linux x86-64 and arm64, and macOS (Intel and Apple Silicon) as **experimental**
+support: it builds and runs, but has no application-menu integration yet — the
+installer just places the binary and icons and prints the command to run it.
+sshfs mounting needs [macFUSE](https://osxfuse.github.io/) installed separately
+(`brew install macfuse sshfs`); everything else, including the web SFTP
+browser, needs nothing extra. The release binary is static (`CGO_ENABLED=0`),
+so on Linux it does not care about your libc, and it covers the `browser` and
+`app` modes; the native `webview` window needs cgo and webkit at build time
+and is source-only.
 
 Re-running the one-liner upgrades in place — it is also what the Update tab
 tells a prebuilt install to do, since there is no checkout there to rebuild.
@@ -115,8 +121,9 @@ Prefer to install offline? Download the `.tar.gz` from the
 
 ## Build & run
 
-Requirements: Go ≥ 1.25, Node ≥ 20, `rsvg-convert` (package `librsvg2-bin`, used to
-render the icons), and `sshfs` / `ssh-keygen` on `PATH`.
+Requirements: Go ≥ 1.25, Node ≥ 20, `rsvg-convert` (package `librsvg2-bin` on Linux,
+`brew install librsvg` on macOS, used to render the icons), and `sshfs` / `ssh-keygen`
+on `PATH` (macOS: `brew install macfuse sshfs`, and `ssh-keygen` ships with the system).
 
 ```sh
 git clone https://github.com/maxx1980/tai
@@ -255,4 +262,5 @@ commands are Linux ones, so it does not run there yet.
 ## Roadmap
 
 Port forwarding (local/remote/SOCKS) with a tunnel monitor, broadcast commands,
-command palette, Ansible/PuTTY import.
+command palette, Ansible/PuTTY import, a real macOS `.app` bundle with Dock/menu
+integration (today's macOS support is a plain binary launched from a shell).

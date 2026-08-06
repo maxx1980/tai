@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Installs a prebuilt webssh from GitHub releases and registers it in the Linux
-# application menu. Everything lands under $HOME — no root, no system paths.
-# Run it with --help for the options; see usage() below for the same text.
+# Installs a prebuilt webssh from GitHub releases. On Linux it also registers
+# it in the application menu; macOS has no equivalent yet, so it installs the
+# binary and icons only — run it from a shell. Everything lands under $HOME —
+# no root, no system paths. Run it with --help for the options; see usage()
+# below for the same text.
 #
 # This script is normally piped into bash, which means it has no file behind it:
 # ${BASH_SOURCE[0]} is unset, so nothing here may read the script itself.
@@ -32,7 +34,8 @@ die() {
 
 usage() {
 	cat <<EOF
-Installs a prebuilt webssh and registers it in the Linux application menu.
+Installs a prebuilt webssh. On Linux it also registers it in the application
+menu; on macOS (experimental) it installs the binary and icons only.
 
   curl -fsSL https://raw.githubusercontent.com/$REPO/main/get.sh | bash
 
@@ -84,13 +87,30 @@ icondir=$data_home/icons/hicolor
 appdir=$data_home/applications
 desktop=$appdir/$BINARY.desktop
 
+case "$(uname -s)" in
+Linux) os_name=linux ;;
+Darwin) os_name=darwin ;;
+*) die "no prebuilt binary for $(uname -s) — build from source (see the README)" ;;
+esac
+
+# exe_of_pid resolves the path of a running process's executable. Linux has
+# /proc; macOS does not, so `ps -o comm=` stands in — it prints the absolute
+# path there, unlike Linux's ps.
+exe_of_pid() {
+	if [[ $os_name == linux ]]; then
+		readlink "/proc/$1/exe" 2>/dev/null
+	else
+		ps -p "$1" -o comm= 2>/dev/null
+	fi
+}
+
 # --- removal ----------------------------------------------------------------
 # Kept here rather than in uninstall.sh: that one drives `make`, which a
 # prebuilt install has no checkout for.
 if ((do_uninstall)); then
 	# Match on the executable, so someone else's "webssh" is never touched.
 	for pid in $(pgrep -x "$BINARY" 2>/dev/null || true); do
-		exe=$(readlink "/proc/$pid/exe" 2>/dev/null || true)
+		exe=$(exe_of_pid "$pid")
 		[[ ${exe%% (deleted)} == "$bindir/$BINARY" ]] || continue
 		echo "==> stopping webssh (pid $pid)"
 		kill "$pid" 2>/dev/null || true
@@ -112,8 +132,6 @@ if ((do_uninstall)); then
 fi
 
 # --- what we can install ----------------------------------------------------
-[[ $(uname -s) == Linux ]] || die "this installer is for Linux (found $(uname -s))"
-
 case "$(uname -m)" in
 x86_64 | amd64) arch=amd64 ;;
 aarch64 | arm64) arch=arm64 ;;
@@ -123,8 +141,9 @@ esac
 case "${mode:-}" in
 "" | browser | app) ;;
 webview)
-	die "the prebuilt binary has no webview: it needs cgo and libwebkit2gtk, so it
-       is built from source only. Clone the repo and run './install.sh --ui webview'."
+	die "the prebuilt binary has no webview: it needs cgo and native GUI
+       libraries, so it is built from source only — see the README's Build
+       section ('./install.sh --ui webview' or 'make build-webview')."
 	;;
 *) die "--ui must be browser or app (got '$mode')" ;;
 esac
@@ -181,7 +200,7 @@ else
 			die "no published release found for $REPO — build from source (see the README)"
 	fi
 
-	name=$BINARY-$version-linux-$arch
+	name=$BINARY-$version-$os_name-$arch
 	base=$DL_BASE/$REPO/releases/download/$version
 	tmp=$(mktemp -d)
 
@@ -219,21 +238,30 @@ mkdir -p "$bindir"
 install -m755 "$src/$BINARY" "$bindir/$BINARY.new"
 mv -f "$bindir/$BINARY.new" "$bindir/$BINARY"
 
-echo "==> installing icons and the launcher"
+echo "==> installing icons"
+# Not install -D: BSD install (macOS) lacks that GNU extension, so the target
+# directory is created explicitly instead.
 for n in $ICON_SIZES; do
-	install -Dm644 "$src/icons/$BINARY-$n.png" "$icondir/${n}x${n}/apps/$BINARY.png"
+	dst="$icondir/${n}x${n}/apps/$BINARY.png"
+	mkdir -p "$(dirname "$dst")"
+	install -m644 "$src/icons/$BINARY-$n.png" "$dst"
 done
-install -Dm644 "$src/icons/$BINARY.svg" "$icondir/scalable/apps/$BINARY.svg"
+dst="$icondir/scalable/apps/$BINARY.svg"
+mkdir -p "$(dirname "$dst")"
+install -m644 "$src/icons/$BINARY.svg" "$dst"
 
-mkdir -p "$appdir"
-# Exec must be an absolute path in a .desktop file.
-sed "s|@EXEC@|$bindir/$BINARY|" "$src/$BINARY.desktop.in" >"$desktop"
-chmod 644 "$desktop"
+if [[ $os_name == linux ]]; then
+	echo "==> registering the application-menu launcher"
+	mkdir -p "$appdir"
+	# Exec must be an absolute path in a .desktop file.
+	sed "s|@EXEC@|$bindir/$BINARY|" "$src/$BINARY.desktop.in" >"$desktop"
+	chmod 644 "$desktop"
 
-command -v gtk-update-icon-cache >/dev/null 2>&1 &&
-	gtk-update-icon-cache -f -t "$icondir" >/dev/null 2>&1 || true
-command -v update-desktop-database >/dev/null 2>&1 &&
-	update-desktop-database "$appdir" >/dev/null 2>&1 || true
+	command -v gtk-update-icon-cache >/dev/null 2>&1 &&
+		gtk-update-icon-cache -f -t "$icondir" >/dev/null 2>&1 || true
+	command -v update-desktop-database >/dev/null 2>&1 &&
+		update-desktop-database "$appdir" >/dev/null 2>&1 || true
+fi
 
 # --- how the interface opens ------------------------------------------------
 # Recorded in the database, the same place the Settings panel writes it, so the
@@ -246,7 +274,12 @@ find_chromium() {
 		c=$(command -v "$c" 2>/dev/null) && echo "$c" && return 0
 	done
 	for c in /opt/google/chrome/google-chrome /opt/microsoft/msedge/microsoft-edge \
-		/opt/brave.com/brave/brave-browser /opt/vivaldi/vivaldi; do
+		/opt/brave.com/brave/brave-browser /opt/vivaldi/vivaldi \
+		"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+		"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge" \
+		"/Applications/Brave Browser.app/Contents/MacOS/Brave Browser" \
+		"/Applications/Vivaldi.app/Contents/MacOS/Vivaldi" \
+		"/Applications/Chromium.app/Contents/MacOS/Chromium"; do
 		[[ -x $c ]] && echo "$c" && return 0
 	done
 	return 1
@@ -279,21 +312,36 @@ esac
 
 installed=$("$bindir/$BINARY" --version)
 
-cat <<EOF
+echo
+echo "${installed} is installed."
+echo "  binary   $bindir/$BINARY"
+[[ $os_name == linux ]] && echo "  launcher $desktop"
+echo "  icons    $icondir/<size>/apps/$BINARY.png"
+echo "  data     $data_home/$BINARY"
+echo "  opens as $how"
+echo
 
-${installed} is installed.
-  binary   $bindir/$BINARY
-  launcher $desktop
-  icons    $icondir/<size>/apps/$BINARY.png
-  data     $data_home/$BINARY
-  opens as $how
-
+if [[ $os_name == linux ]]; then
+	cat <<EOF
 It should now show up in the application menu; some desktops need a re-login
 before a newly added launcher appears. The mode can be changed in Settings, or
 per run with '--ui browser|app'. Remove everything again with:
 
   curl -fsSL https://raw.githubusercontent.com/$REPO/main/get.sh | bash -s -- --uninstall
 EOF
+else
+	cat <<EOF
+macOS has no application-menu integration yet (experimental support) — run it
+from a shell:
+
+  $bindir/$BINARY
+
+The mode can be changed in Settings, or per run with '--ui browser|app'.
+Remove everything again with:
+
+  curl -fsSL https://raw.githubusercontent.com/$REPO/main/get.sh | bash -s -- --uninstall
+EOF
+fi
 
 case ":$PATH:" in
 *":$bindir:"*) ;;
@@ -311,7 +359,7 @@ esac
 
 # An already-running copy keeps executing the old binary until it is restarted.
 for pid in $(pgrep -x "$BINARY" 2>/dev/null || true); do
-	exe=$(readlink "/proc/$pid/exe" 2>/dev/null || true)
+	exe=$(exe_of_pid "$pid")
 	if [[ ${exe%% (deleted)} == "$bindir/$BINARY" ]]; then
 		echo
 		echo "An older webssh is still running (pid $pid); restart it to pick this one up."

@@ -305,6 +305,9 @@ func fallbackDirs(home string) []string {
 		filepath.Join(home, "go", "bin"),
 		"/usr/local/go/bin",
 		"/usr/local/bin",
+		// Homebrew on Apple Silicon installs under /opt/homebrew instead of
+		// /usr/local (Intel Macs still use /usr/local, already covered above).
+		"/opt/homebrew/bin",
 	}
 	// nvm keeps every node under its own version directory and puts none of
 	// them anywhere stable, so take the newest rather than guess a version.

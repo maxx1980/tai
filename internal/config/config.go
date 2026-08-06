@@ -4,6 +4,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 // Setting keys stored in the DB.
@@ -62,8 +63,8 @@ const (
 func Defaults(home string) map[string]string {
 	return map[string]string{
 		// {{alias}} {{user}} {{host}} {{port}} {{mountpoint}} are substituted at spawn time.
-		KeyTerminalCmd: "gnome-terminal -- ssh {{alias}}",
-		KeyFilesCmd:    "xdg-open {{mountpoint}}",
+		KeyTerminalCmd: defaultTerminalCmd(),
+		KeyFilesCmd:    defaultFilesCmd(),
 		// Empty means "use the system default browser" (xdg-open / open / rundll32).
 		// A custom command may use the {{url}} placeholder, else the URL is appended.
 		KeyBrowserCmd:      "",
@@ -77,6 +78,28 @@ func Defaults(home string) map[string]string {
 		KeyUIMode:          "app",
 		KeyAppBrowser:      "",
 	}
+}
+
+// defaultTerminalCmd is the terminal_cmd default for the current platform.
+// Spawn (internal/launcher) parses the template with a quote-aware splitter
+// instead of a shell, so the AppleScript's double-quoted string literal has to
+// survive inside the single-quoted -e argument — splitFields only tracks the
+// quote character that opened a field, so the inner double quotes pass through
+// untouched.
+func defaultTerminalCmd() string {
+	if runtime.GOOS == "darwin" {
+		return `osascript -e 'tell application "Terminal" to do script "ssh {{alias}}"'`
+	}
+	return "gnome-terminal -- ssh {{alias}}"
+}
+
+// defaultFilesCmd is the files_cmd default: whatever opens a folder in the
+// platform's file manager.
+func defaultFilesCmd() string {
+	if runtime.GOOS == "darwin" {
+		return "open {{mountpoint}}"
+	}
+	return "xdg-open {{mountpoint}}"
 }
 
 // Paths holds the resolved locations webssh reads and writes.
