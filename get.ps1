@@ -34,6 +34,13 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# PowerShell 7.3+ treats a native command's stderr output as a terminating
+# error whenever it also exits non-zero, honoring $ErrorActionPreference
+# above — exactly what wsl.exe does when WSL isn't installed yet, which is
+# the one case this script most needs to handle instead of crashing on. Turn
+# that off; exit codes are checked explicitly below. A harmless no-op on
+# versions without this preference variable (Windows PowerShell 5.1, PS <7.3).
+$PSNativeCommandUseErrorActionPreference = $false
 
 function Test-IsAdmin {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -42,10 +49,9 @@ function Test-IsAdmin {
 }
 
 function Test-WslReady {
-    # Discard stderr on its own stream rather than merging it with 2>&1: when
-    # WSL isn't installed, wsl.exe writes exactly that to stderr, and merging
-    # wraps it as an ErrorRecord that $ErrorActionPreference = "Stop" turns
-    # into a crash instead of the non-zero exit code this function checks for.
+    # wsl.exe writes to stderr and exits non-zero when WSL isn't installed;
+    # $PSNativeCommandUseErrorActionPreference above keeps that from being
+    # treated as a terminating error, so it's safe to just check the exit code.
     $null = & wsl.exe --status 2>$null
     return $LASTEXITCODE -eq 0
 }
