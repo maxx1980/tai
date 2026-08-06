@@ -149,7 +149,8 @@ func (u *Updater) Check(ctx context.Context, force bool) (Info, error) {
 func canUpdate(dir string) (bool, string) {
 	if missing := missingTools(); len(missing) > 0 {
 		return false, "missing build tools: " + strings.Join(missing, ", ") +
-			" — install them (see install.sh) or update by hand"
+			" — not found in your login shell's PATH either; install them (see" +
+			" install.sh), or update by hand with `git pull && make build`"
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
 	defer cancel()
@@ -166,13 +167,143 @@ func canUpdate(dir string) (bool, string) {
 
 func missingTools() []string {
 	var missing []string
+	path := buildPATH()
 	for _, t := range requiredTools {
-		if _, err := exec.LookPath(t); err != nil {
+		if _, ok := lookIn(path, t); !ok {
 			missing = append(missing, t)
 		}
 	}
 	return missing
 }
+
+// lookIn finds name as an executable in one of path's directories.
+// exec.LookPath would do this, but only against the process's own PATH, which
+// is exactly the value buildPATH exists to replace.
+func lookIn(path, name string) (string, bool) {
+	for _, dir := range filepath.SplitList(path) {
+		if dir == "" {
+			dir = "."
+		}
+		full := filepath.Join(dir, name)
+		fi, err := os.Stat(full)
+		if err == nil && !fi.IsDir() && fi.Mode()&0o111 != 0 {
+			return full, true
+		}
+	}
+	return "", false
+}
+
+// resolve turns a command name into the absolute path buildPATH says it has.
+// This is not optional: exec.Command resolves a bare name against the *running
+// process's* PATH and ignores cmd.Env entirely, so a tool that only buildPATH
+// can see would still come out "executable file not found" — or, worse, would
+// silently resolve to a different copy in /usr/bin than the one the user builds
+// with. Unresolvable names are passed through so exec reports them.
+func resolve(name string) string {
+	if strings.ContainsRune(name, os.PathSeparator) {
+		return name
+	}
+	if full, ok := lookIn(buildPATH(), name); ok {
+		return full
+	}
+	return name
+}
+
+// buildPATH is the PATH the tool check and the rebuild use — deliberately not
+// the one webssh inherited.
+//
+// webssh is normally started from the application menu, and a desktop session
+// hands its children a bare PATH: /usr/local/bin:/usr/bin:/bin and little else.
+// Anything the user installed under their home — Go in ~/.local/go/bin, node
+// under ~/.nvm — is invisible there, so the updater would report tools missing
+// that are plainly installed and that `make build` in a terminal finds without
+// trouble.
+//
+// The authoritative answer is the login shell's own PATH, because that is what
+// the user's own `make build` runs with. Ask it once, and fall back to the
+// usual install directories when it cannot be asked.
+var buildPATH = sync.OnceValue(resolveBuildPATH)
+
+func resolveBuildPATH() string {
+	var dirs []string
+	seen := map[string]bool{}
+	add := func(list string) {
+		for _, d := range filepath.SplitList(list) {
+			if d == "" || seen[d] {
+				continue
+			}
+			seen[d] = true
+			dirs = append(dirs, d)
+		}
+	}
+	add(loginShellPATH())  // what the user actually builds with
+	add(os.Getenv("PATH")) // whatever we were started with
+	if home, err := os.UserHomeDir(); err == nil {
+		for _, d := range fallbackDirs(home) {
+			if fi, serr := os.Stat(d); serr == nil && fi.IsDir() {
+				add(d)
+			}
+		}
+	}
+	return strings.Join(dirs, string(os.PathListSeparator))
+}
+
+// shellTimeout bounds the login-shell probe. A shell rc that blocks would
+// otherwise stall the first update check, which runs on page load.
+const shellTimeout = 5 * time.Second
+
+// loginShellPATH asks the user's login shell to print its PATH. The marker is
+// there because an interactive shell may print a prompt or a banner first, and
+// -i is needed alongside -l because zsh reads .zshrc — where a PATH is usually
+// set — only when it is interactive.
+func loginShellPATH() string {
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), shellTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, shell, "-lic", `printf 'WEBSSH_PATH=%s\n' "$PATH"`)
+	// Output captures stdout only, so anything the rc prints to stderr is
+	// discarded rather than mistaken for an answer.
+	out, err := cmd.Output()
+	if err != nil && len(out) == 0 {
+		return ""
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "WEBSSH_PATH="); ok {
+			return v
+		}
+	}
+	return ""
+}
+
+// fallbackDirs lists where the build tools are conventionally installed, for
+// when the shell cannot be asked. Only directories that exist are used.
+func fallbackDirs(home string) []string {
+	dirs := []string{
+		filepath.Join(home, ".local", "bin"),
+		filepath.Join(home, ".local", "go", "bin"),
+		filepath.Join(home, "go", "bin"),
+		"/usr/local/go/bin",
+		"/usr/local/bin",
+	}
+	// nvm keeps every node under its own version directory and puts none of
+	// them anywhere stable, so take the newest rather than guess a version.
+	if matches, _ := filepath.Glob(filepath.Join(home, ".nvm", "versions", "node", "v*", "bin")); len(matches) > 0 {
+		newest := matches[0]
+		for _, m := range matches[1:] {
+			if version.Compare(version.Parse(nodeVersionOf(m)), version.Parse(nodeVersionOf(newest))) > 0 {
+				newest = m
+			}
+		}
+		dirs = append(dirs, newest)
+	}
+	return dirs
+}
+
+// nodeVersionOf pulls "v22.23.1" out of ".../versions/node/v22.23.1/bin".
+func nodeVersionOf(binDir string) string { return filepath.Base(filepath.Dir(binDir)) }
 
 // Current returns the running build's version. Normally that is the string the
 // Makefile stamped in; a binary from a bare `go build` carries none, so fall
@@ -403,7 +534,7 @@ func (u *Updater) steps(dir, tag string, snapshot func() (string, error)) error 
 // run executes a command in dir and streams every line it prints into the
 // status log, so the panel shows real progress instead of a spinner.
 func (u *Updater) run(ctx context.Context, dir, name string, args ...string) error {
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := exec.CommandContext(ctx, resolve(name), args...)
 	cmd.Dir = dir
 	cmd.Env = commandEnv()
 
@@ -458,7 +589,7 @@ func (u *Updater) logf(format string, a ...any) {
 
 // git runs a git command in dir and returns its trimmed stdout.
 func git(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := exec.CommandContext(ctx, resolve("git"), args...)
 	cmd.Dir = dir
 	cmd.Env = commandEnv()
 	var out, errb bytes.Buffer
@@ -478,7 +609,17 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 // terminal a credential or passphrase prompt does not fail, it hangs — and the
 // user is left watching an update that never finishes.
 func commandEnv() []string {
-	return append(os.Environ(),
+	// Drop the inherited PATH rather than append over it: with a duplicate key
+	// glibc's getenv returns the first, so an appended one would be ignored and
+	// make would go looking for go and npm on the desktop session's bare PATH.
+	env := make([]string, 0, len(os.Environ())+4)
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "PATH=") {
+			env = append(env, kv)
+		}
+	}
+	return append(env,
+		"PATH="+buildPATH(),
 		"GIT_TERMINAL_PROMPT=0",
 		"GIT_SSH_COMMAND=ssh -o BatchMode=yes",
 		"GCM_INTERACTIVE=never",
