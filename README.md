@@ -92,7 +92,7 @@ go build -o webssh ./cmd/webssh
 ./webssh                 # prints http://127.0.0.1:8022/?token=…
 ```
 
-Flags: `--addr 127.0.0.1:8022`, `--no-open`, `--ui browser|app|webview`.
+Flags: `--addr 127.0.0.1:8022`, `--no-open`, `--ui browser|app|webview`, `--version`.
 
 ## How the interface opens
 

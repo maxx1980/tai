@@ -102,7 +102,7 @@ go build -o webssh ./cmd/webssh
 ./webssh                 # напечатает http://127.0.0.1:8022/?token=…
 ```
 
-Флаги: `--addr 127.0.0.1:8022`, `--no-open`, `--ui browser|app|webview`.
+Флаги: `--addr 127.0.0.1:8022`, `--no-open`, `--ui browser|app|webview`, `--version`.
 
 ## Как открывается интерфейс
 

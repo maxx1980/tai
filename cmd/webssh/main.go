@@ -29,6 +29,7 @@ import (
 	"webssh/internal/health"
 	"webssh/internal/server"
 	"webssh/internal/store"
+	"webssh/internal/update"
 )
 
 func main() {
@@ -38,7 +39,16 @@ func main() {
 	setUI := flag.String("set-ui-mode", "", "store browser|app|webview as the default and exit (used by install.sh)")
 	setAppBrowser := flag.String("set-app-browser", "", "store which browser the app window uses and exit (used by install.sh)")
 	listBrowsers := flag.Bool("list-app-browsers", false, "print the chromium-based browsers that can host an app window, and exit")
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		// update.Current, not version.Version: a binary built with a bare
+		// `go build` carries no stamp, and answering "dev" when the working
+		// copy can say exactly which commit it is would be needlessly unhelpful.
+		fmt.Println("webssh", update.Current())
+		return
+	}
 
 	if *listBrowsers {
 		for _, b := range appwin.FindChromiumAll() {

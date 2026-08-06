@@ -101,7 +101,7 @@ go build -o webssh ./cmd/webssh
 ./webssh                 # надрукує http://127.0.0.1:8022/?token=…
 ```
 
-Прапорці: `--addr 127.0.0.1:8022`, `--no-open`, `--ui browser|app|webview`.
+Прапорці: `--addr 127.0.0.1:8022`, `--no-open`, `--ui browser|app|webview`, `--version`.
 
 ## Як відкривається інтерфейс
 
