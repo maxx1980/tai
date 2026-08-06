@@ -2,48 +2,52 @@
 
 // Command webssh-setup is a native double-click installer for Windows: it
 // gets WSL and a Linux distro ready (installing whichever is missing,
-// self-elevating via UAC only when that's actually needed) and then runs the
-// normal get.sh installer inside that distro. It exists because webssh has
-// no native Windows build yet — internal/pty has no ConPTY backend, so the
-// web terminal cannot start a shell outside WSL — and because get.bat/get.ps1
-// need a console and, on a stock system, fight PowerShell's script
-// ExecutionPolicy. A compiled .exe sidesteps both.
+// self-elevating via UAC only when that's actually needed), runs the normal
+// get.sh installer inside that distro, then installs webssh-launcher.exe
+// (embedded below) and points a Desktop and Start Menu shortcut at it, so
+// the app is reachable like any other installed program from then on. It
+// exists because webssh has no native Windows build yet — internal/pty has
+// no ConPTY backend, so the web terminal cannot start a shell outside WSL —
+// and because get.bat/get.ps1 need a console and, on a stock system, fight
+// PowerShell's script ExecutionPolicy. A compiled .exe sidesteps both.
 package main
 
 import (
 	"bufio"
+	_ "embed"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
-	"syscall"
-	"unicode"
-	"unicode/utf16"
-	"unsafe"
 
-	"golang.org/x/sys/windows"
+	"webssh/internal/wslutil"
 )
 
 const (
 	defaultDistro = "Ubuntu"
 	getShURL      = "https://raw.githubusercontent.com/maxx1980/tai/main/get.sh"
+	appName       = "webssh"
 )
+
+//go:embed assets/webssh-launcher.exe
+var launcherExe []byte
 
 func main() {
 	fmt.Println("webssh installer for Windows (via WSL)")
 	fmt.Println()
 
-	if _, err := exec.LookPath("wsl.exe"); err != nil {
+	if !wslutil.Available() {
 		fail("wsl.exe was not found. This needs Windows 10 build 1607+ (2004+ recommended) — update Windows and try again.")
 	}
 
-	if !wslReady() {
-		if !isElevated() {
-			relaunchElevated()
+	if !wslutil.Ready() {
+		if !wslutil.IsElevated() {
+			requestElevationAndExit()
 			return
 		}
 		fmt.Printf("Installing WSL and %s (this can take a few minutes)...\n", defaultDistro)
-		run("wsl.exe", "--install", "-d", defaultDistro)
+		wslutil.InstallDistro(defaultDistro)
 		fmt.Println()
 		fmt.Println("WSL was just installed. Windows usually needs a reboot before it can run it.")
 		fmt.Println("Reboot, then run this installer again to finish installing webssh.")
@@ -55,15 +59,15 @@ func main() {
 	// output to find it: that output needs UTF-16 decoding, which is more
 	// fragile than just trying the name we expect and checking the exit code.
 	distro := defaultDistro
-	if !distroReady(distro) {
-		distros := wslDistros()
+	if !wslutil.DistroReady(distro) {
+		distros := wslutil.Distros()
 		if len(distros) == 0 {
-			if !isElevated() {
-				relaunchElevated()
+			if !wslutil.IsElevated() {
+				requestElevationAndExit()
 				return
 			}
 			fmt.Printf("WSL is present but has no Linux distro yet. Installing %s...\n", defaultDistro)
-			run("wsl.exe", "--install", "-d", defaultDistro)
+			wslutil.InstallDistro(defaultDistro)
 			fmt.Println("Installed. Run this installer again to continue installing webssh.")
 			pause()
 			return
@@ -78,123 +82,99 @@ func main() {
 	// a brand-new distro would otherwise show, and webssh needs nothing a
 	// non-root user would give it that root does not already have.
 	installCmd := fmt.Sprintf("curl -fsSL %s | bash", getShURL)
-	if err := runChecked("wsl.exe", "-d", distro, "-u", "root", "--", "bash", "-lc", installCmd); err != nil {
+	if err := wslutil.RunChecked("wsl.exe", "-d", distro, "-u", "root", "--", "bash", "-lc", installCmd); err != nil {
 		fail(fmt.Sprintf("webssh install failed inside WSL: %v", err))
 	}
 
 	fmt.Println()
-	fmt.Printf("webssh is installed inside WSL (%s). To start it:\n", distro)
-	// wsl -u root -- <cmd> isn't a login shell, so ~/.profile (which is what
-	// adds ~/.local/bin to PATH) never runs - the full path is required.
-	fmt.Printf("  wsl -d %s -u root -- /root/.local/bin/webssh --no-open\n", distro)
-	fmt.Println()
-	fmt.Println("--no-open matters here: webssh's default 'app' mode looks for a")
-	fmt.Println("chromium-based browser to open, and a bare WSL distro has none —")
-	fmt.Println("you don't need to install one there. WSL2 forwards localhost to")
-	fmt.Println("Windows automatically, so once it prints a URL like")
-	fmt.Println("http://127.0.0.1:8022/?token=..., open it in whatever browser")
-	fmt.Println("you already have on Windows.")
-	pause()
-}
-
-// wslReady reports whether WSL itself is installed and usable. wsl.exe exits
-// non-zero (and prints an explanatory line to stderr, which is discarded
-// here) when it isn't.
-func wslReady() bool {
-	cmd := exec.Command("wsl.exe", "--status")
-	return cmd.Run() == nil
-}
-
-// distroReady checks whether a specific distro exists and can run a command
-// as root, without needing to parse any of wsl.exe's text output.
-func distroReady(name string) bool {
-	cmd := exec.Command("wsl.exe", "-d", name, "-u", "root", "--", "true")
-	return cmd.Run() == nil
-}
-
-// wslDistros lists the registered WSL distros, e.g. ["Ubuntu"]. Only used as
-// a fallback when the default distro name doesn't just work.
-func wslDistros() []string {
-	out, err := exec.Command("wsl.exe", "-l", "-q").Output()
+	fmt.Println("Setting up the Desktop/Start Menu shortcut...")
+	launcherPath, err := installLauncher()
 	if err != nil {
-		return nil
+		fail(fmt.Sprintf("could not install the launcher: %v", err))
 	}
-	var distros []string
-	for _, line := range strings.Split(decodeWslText(out), "\n") {
-		line = strings.TrimFunc(line, func(r rune) bool {
-			return !unicode.IsPrint(r)
-		})
-		if line != "" {
-			distros = append(distros, line)
+	if err := createShortcuts(launcherPath); err != nil {
+		// Not fatal - webssh is fully installed either way, and the manual
+		// start command below still works.
+		fmt.Printf("Warning: could not create shortcuts: %v\n", err)
+	} else {
+		fmt.Println("Added a 'webssh' shortcut to your Desktop and Start Menu.")
+	}
+
+	fmt.Println()
+	fmt.Println("Done. Starting webssh now — it'll open in your browser shortly.")
+	fmt.Println("Next time, just use the webssh shortcut.")
+	pause()
+
+	_ = exec.Command(launcherPath).Start()
+}
+
+// installLauncher writes the embedded webssh-launcher.exe to a stable,
+// permanent location - it can't stay wherever webssh-setup.exe was
+// downloaded to (e.g. Downloads), since a shortcut needs a path that lasts.
+func installLauncher() (string, error) {
+	dir := filepath.Join(os.Getenv("LOCALAPPDATA"), appName)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, "webssh-launcher.exe")
+	if err := os.WriteFile(path, launcherExe, 0o755); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// createShortcuts creates a Desktop and Start Menu .lnk pointing at target,
+// via the decades-old WScript.Shell COM approach - there's no Win32 API for
+// this that doesn't mean writing the Shell Link binary format by hand, and
+// this one-liner is about as well-trodden as Windows scripting gets.
+func createShortcuts(target string) error {
+	locations := []string{
+		filepath.Join(os.Getenv("USERPROFILE"), "Desktop", appName+".lnk"),
+		filepath.Join(os.Getenv("APPDATA"), "Microsoft", "Windows", "Start Menu", "Programs", appName+".lnk"),
+	}
+	var firstErr error
+	for _, path := range locations {
+		if err := createShortcut(path, target); err != nil && firstErr == nil {
+			firstErr = err
 		}
 	}
-	return distros
+	return firstErr
 }
 
-// decodeWslText decodes wsl.exe's console output. Real console apps on
-// Windows switch to UTF-16LE (sometimes but not always with a leading BOM)
-// when stdout is a pipe rather than an actual console, which is exactly the
-// case when os/exec captures it.
-func decodeWslText(b []byte) string {
-	if len(b) >= 2 && b[0] == 0xFF && b[1] == 0xFE {
-		b = b[2:]
+func createShortcut(shortcutPath, target string) error {
+	script := fmt.Sprintf(
+		`$sh = New-Object -ComObject WScript.Shell; $s = $sh.CreateShortcut(%s); $s.TargetPath = %s; $s.IconLocation = %s; $s.Description = %s; $s.Save()`,
+		psQuote(shortcutPath), psQuote(target), psQuote(target+",0"), psQuote("webssh - local SSH control panel"),
+	)
+	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg != "" {
+			return fmt.Errorf("%s: %w", msg, err)
+		}
+		return err
 	}
-	u16 := make([]uint16, 0, len(b)/2)
-	for i := 0; i+1 < len(b); i += 2 {
-		u16 = append(u16, uint16(b[i])|uint16(b[i+1])<<8)
-	}
-	return string(utf16.Decode(u16))
+	return nil
 }
 
-// run runs a command with its output going straight to this console and
-// ignores the result - used for `wsl --install`, whose own progress output
-// is the feedback the user needs to see.
-func run(name string, args ...string) {
-	cmd := exec.Command(name, args...)
-	cmd.Stdout, cmd.Stderr, cmd.Stdin = os.Stdout, os.Stderr, os.Stdin
-	_ = cmd.Run()
+// psQuote wraps s in single quotes for a PowerShell command line. Single
+// quotes are used deliberately: PowerShell does no escape processing inside
+// them (unlike double quotes, where a literal backslash - unavoidable in any
+// Windows path - would need its own escaping rules), so the only character
+// that needs handling is a literal single quote, doubled per PowerShell's rule.
+func psQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
-// runChecked is like run but reports whether the command failed.
-func runChecked(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
-	cmd.Stdout, cmd.Stderr, cmd.Stdin = os.Stdout, os.Stderr, os.Stdin
-	return cmd.Run()
-}
-
-// isElevated reports whether this process already has administrator rights.
-func isElevated() bool {
-	return windows.GetCurrentProcessToken().IsElevated()
-}
-
-// relaunchElevated re-starts this same executable through Windows' "runas"
-// verb, which is what makes the OS show the standard UAC prompt, then exits
-// the current (unprivileged) process. golang.org/x/sys/windows doesn't wrap
-// shell32's ShellExecuteW, so it's called directly.
-func relaunchElevated() {
+func requestElevationAndExit() {
 	fmt.Println("Administrator rights are needed to install WSL. Requesting elevation...")
 	exePath, err := os.Executable()
 	if err != nil {
 		fail("could not determine my own path to elevate: " + err.Error())
 	}
-
-	shell32 := syscall.NewLazyDLL("shell32.dll")
-	shellExecute := shell32.NewProc("ShellExecuteW")
-
-	verb, _ := syscall.UTF16PtrFromString("runas")
-	file, _ := syscall.UTF16PtrFromString(exePath)
-	const swShowNormal = 1
-	ret, _, _ := shellExecute.Call(
-		0,
-		uintptr(unsafe.Pointer(verb)),
-		uintptr(unsafe.Pointer(file)),
-		0,
-		0,
-		swShowNormal,
-	)
-	// ShellExecute returns a value > 32 on success, an error code otherwise.
-	if ret <= 32 {
-		fail(fmt.Sprintf("could not request elevation (error code %d) — right-click this program and choose \"Run as administrator\" instead.", ret))
+	if err := wslutil.RelaunchElevated(exePath); err != nil {
+		fail(fmt.Sprintf("could not request elevation (%v) — right-click this program and choose \"Run as administrator\" instead.", err))
 	}
 }
 

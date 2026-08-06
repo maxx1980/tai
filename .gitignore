@@ -2,6 +2,7 @@
 /webssh
 /webssh.exe
 /webssh-setup.exe
+/webssh-launcher.exe
 
 # Release archives (rebuild with `make dist-all`)
 /dist/
@@ -10,6 +11,9 @@
 assets/png/
 cmd/webssh/*.syso
 cmd/webssh-setup/*.syso
+cmd/webssh-launcher/*.syso
+# Embedded copy webssh-setup builds against - see `make build-windows-setup`
+cmd/webssh-setup/assets/webssh-launcher.exe
 
 # Frontend
 web/node_modules/
