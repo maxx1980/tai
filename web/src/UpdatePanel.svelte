@@ -98,12 +98,17 @@
         {/if}
       </div>
 
-      {#if info.available}
+      {#if info.available && info.can_update}
         <p>
           A newer version is tagged on GitHub. Updating fetches that tag into
           <span class="mono">{info.source_dir}</span> and rebuilds the binary there — the same
           steps <span class="mono">install.sh</span> runs, so it needs go, npm, make and
           rsvg-convert. Your hosts, keys and settings live in the database and are not touched.
+        </p>
+      {:else if info.available}
+        <p>
+          A newer version is out, but this copy cannot update itself. Your hosts, keys and
+          settings live in the database, so whatever you do below leaves them alone.
         </p>
       {:else if info.latest}
         <p class="muted">
@@ -219,6 +224,8 @@
     padding: 10px 12px;
     font-size: 13px;
     margin-bottom: 12px;
+    /* A blocker may end in a command to run; keep it on its own line. */
+    white-space: pre-line;
   }
   .log {
     background: var(--panel-2);

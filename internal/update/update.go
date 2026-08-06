@@ -3,12 +3,14 @@
 // user asks for it — fetches that tag, rebuilds the binary with make and hands
 // back to the caller to restart.
 //
-// It only knows how to update a git working copy, because that is the only way
-// webssh is installed: install.sh clones the repository and runs make, and the
-// project publishes no prebuilt binaries. So an update is always a rebuild and
-// needs the same toolchain the install needed. Every reason it cannot proceed
-// is reported as data (Info.Blocker) rather than an error, because "this is a
-// packaged copy, not a checkout" is a normal state, not a failure.
+// It only knows how to update a git working copy, because that is the only
+// install it can rebuild: install.sh clones the repository and runs make, so an
+// update there is a rebuild and needs the same toolchain the install needed. A
+// prebuilt install from a release archive has no checkout and no toolchain, so
+// it is still told a newer version exists — the installer that put it there is
+// what replaces it. Every reason an update cannot proceed is reported as data
+// (Info.Blocker) rather than an error, because "this is a packaged copy, not a
+// checkout" is a normal state, not a failure.
 package update
 
 import (
@@ -48,6 +50,17 @@ const (
 	// re-sent on every poll, so keep only the tail that is worth reading.
 	maxLogLines = 500
 )
+
+// DefaultRepo is where releases come from. It is only consulted when there is
+// no checkout to read an origin remote from — a source install always follows
+// its own remote, so a fork updates from the fork.
+const DefaultRepo = "maxx1980/tai"
+
+// InstallCmd replaces a prebuilt install: get.sh downloads the newest release
+// over the binary, icons and launcher it put there in the first place. Shown to
+// the user, so it is written the way it would be pasted into a shell.
+const InstallCmd = "curl -fsSL https://raw.githubusercontent.com/" + DefaultRepo +
+	"/main/get.sh | bash"
 
 // requiredTools are the commands the rebuild shells out to — the same list
 // install.sh checks. They are verified up front rather than when they are
@@ -114,19 +127,20 @@ func (u *Updater) Check(ctx context.Context, force bool) (Info, error) {
 
 	info := Info{Current: Current(), CheckedAt: time.Now()}
 
-	dir, err := SourceDir()
-	if err != nil {
-		info.Blocker = err.Error()
-		u.cached = info
-		return info, nil
-	}
-	info.SourceDir = dir
-
-	slug, err := repoSlug(ctx, dir)
-	if err != nil {
-		info.Blocker = err.Error()
-		u.cached = info
-		return info, nil
+	// A prebuilt install has no checkout to read the remote from, but it is
+	// still worth telling it that a new version is out, so fall back to the
+	// project's own repository.
+	slug := DefaultRepo
+	dir, dirErr := SourceDir()
+	if dirErr == nil {
+		info.SourceDir = dir
+		s, err := repoSlug(ctx, dir)
+		if err != nil {
+			info.Blocker = err.Error()
+			u.cached = info
+			return info, nil
+		}
+		slug = s
 	}
 	info.Repo = slug
 
@@ -138,7 +152,11 @@ func (u *Updater) Check(ctx context.Context, force bool) (Info, error) {
 	info.NotesURL = "https://github.com/" + slug + "/releases/tag/" + latest
 	info.Available = version.IsNewer(latest, info.Current)
 
-	info.CanUpdate, info.Blocker = canUpdate(dir)
+	if dirErr != nil {
+		info.Blocker = dirErr.Error() + ".\nUpdate it by re-running the installer:\n\n" + InstallCmd
+	} else {
+		info.CanUpdate, info.Blocker = canUpdate(dir)
+	}
 	u.cached = info
 	return info, nil
 }
@@ -364,9 +382,9 @@ func repoSlug(ctx context.Context, dir string) (string, error) {
 	return m[1] + "/" + m[2], nil
 }
 
-// latestTag returns the highest version tag on the GitHub repo. Tags are used
-// rather than releases because the project publishes tags and attaches no
-// release artifacts — a rebuild only ever needs a ref to check out.
+// latestTag returns the highest version tag on the GitHub repo. Tags rather
+// than releases: a rebuild needs a ref to check out, and every release is
+// tagged while not every tag is released, so the tag list is the complete one.
 func latestTag(ctx context.Context, slug string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		"https://api.github.com/repos/"+slug+"/tags?per_page=100", nil)

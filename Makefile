@@ -1,4 +1,4 @@
-.PHONY: all ui build build-webview run clean deps dev icons syso build-windows install-desktop uninstall-desktop
+.PHONY: all ui build build-webview run clean deps dev icons syso build-windows install-desktop uninstall-desktop dist dist-all
 
 BINARY := webssh
 # VERSION is stamped into the binary so the updater can compare it with the
@@ -12,6 +12,10 @@ WINRES := GOTOOLCHAIN=$(shell go env GOVERSION) go run github.com/tc-hib/go-winr
 ICON_SIZES := 16 24 32 48 64 128 256 512
 DESKTOP_DIR := $(HOME)/.local/share/applications
 ICON_DIR := $(HOME)/.local/share/icons/hicolor
+# Release archives. ARCH is overridable so one host can build both of them.
+ARCH ?= $(shell go env GOARCH)
+DIST_DIR := dist
+DIST_NAME := $(BINARY)-$(VERSION)-linux-$(ARCH)
 
 all: build
 
@@ -42,6 +46,36 @@ syso: icons
 
 build-windows: ui syso
 	GOOS=windows GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(BINARY).exe ./cmd/webssh
+
+# dist packs a release archive: the binary plus the icons and .desktop template
+# get.sh needs to register the app, and get.sh itself so the archive installs
+# offline. CGO is off, which makes the binary static (it runs on any glibc or
+# musl system) and cross-compiles without a C toolchain — the price is that a
+# release binary has no webview mode, since that one needs cgo and webkit.
+dist: ui
+	rm -rf $(DIST_DIR)/$(DIST_NAME)
+	mkdir -p $(DIST_DIR)/$(DIST_NAME)/icons
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH) \
+		go build -trimpath -ldflags "-s -w $(LDFLAGS)" -o $(DIST_DIR)/$(DIST_NAME)/$(BINARY) ./cmd/webssh
+	for n in $(ICON_SIZES); do \
+		install -m644 assets/png/icon-$$n.png $(DIST_DIR)/$(DIST_NAME)/icons/$(BINARY)-$$n.png; \
+	done
+	install -m644 assets/icon.svg $(DIST_DIR)/$(DIST_NAME)/icons/$(BINARY).svg
+	install -m644 packaging/webssh.desktop.in $(DIST_DIR)/$(DIST_NAME)/$(BINARY).desktop.in
+	install -m755 get.sh $(DIST_DIR)/$(DIST_NAME)/get.sh
+	tar -czf $(DIST_DIR)/$(DIST_NAME).tar.gz -C $(DIST_DIR) $(DIST_NAME)
+	rm -rf $(DIST_DIR)/$(DIST_NAME)
+	cd $(DIST_DIR) && sha256sum *.tar.gz > SHA256SUMS
+	@echo "==> $(DIST_DIR)/$(DIST_NAME).tar.gz"
+
+# dist-all builds every architecture a release publishes. The SHA256SUMS the
+# last run writes covers all of them, which is what get.sh verifies against.
+dist-all:
+	rm -rf $(DIST_DIR)
+	$(MAKE) dist ARCH=amd64
+	$(MAKE) dist ARCH=arm64
+	@echo
+	@cat $(DIST_DIR)/SHA256SUMS
 
 # run builds everything and starts the server (opens the browser).
 run: build
@@ -74,4 +108,4 @@ uninstall-desktop:
 
 clean:
 	rm -f $(BINARY) $(BINARY).exe cmd/webssh/*.syso
-	rm -rf web/dist web/node_modules assets/png
+	rm -rf web/dist web/node_modules assets/png $(DIST_DIR)

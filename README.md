@@ -45,7 +45,8 @@ terminal is included as a fallback for remote use.
   GitHub; when one is newer, an Update tab appears left of Inventory. It offers
   to copy the database first, then fetches the tag into your checkout, rebuilds
   and restarts. Needs the same tools the install did (go, npm, make,
-  rsvg-convert) and a clean working copy.
+  rsvg-convert) and a clean working copy. A prebuilt install has no checkout to
+  rebuild, so the tab shows the one-line installer to re-run instead.
 - **Health checks** — background probes colour each host green (its port is
   open), yellow (answers ping only) or red (unreachable).
 - **Master password** — optional gate over the whole panel, plus encrypted
@@ -70,6 +71,42 @@ The daemon is powerful, so it is locked down:
   capped at 4096 addresses and 20000 probes.
 
 Do not expose it to the network.
+
+## Install (prebuilt binary)
+
+One line, no toolchain — it downloads the newest release, checks its SHA-256 and
+registers webssh in the application menu:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/maxx1980/tai/main/get.sh | bash
+```
+
+Everything lands under `$HOME`; nothing needs root:
+
+- binary → `~/.local/bin/webssh`
+- icons → `~/.local/share/icons/hicolor/<size>/apps/webssh.png` (+ `scalable/…svg`)
+- launcher → `~/.local/share/applications/webssh.desktop`
+- data → `~/.local/share/webssh` (untouched by a re-install)
+
+Options go after `-s --`, because the script is being piped into bash:
+
+```sh
+... | bash -s -- --ui browser        # a plain browser tab, not an app window
+... | bash -s -- --version v0.4.0    # one specific release
+... | bash -s -- --prefix ~/apps     # binary in ~/apps/bin instead
+... | bash -s -- --run               # start it once installed
+... | bash -s -- --uninstall         # remove binary, icons and launcher
+```
+
+Linux x86-64 and arm64. The release binary is static (`CGO_ENABLED=0`), so it
+does not care about your libc, and it covers the `browser` and `app` modes; the
+native `webview` window needs cgo and webkit at build time and is source-only.
+
+Re-running the one-liner upgrades in place — it is also what the Update tab
+tells a prebuilt install to do, since there is no checkout there to rebuild.
+Prefer to install offline? Download the `.tar.gz` from the
+[releases page](https://github.com/maxx1980/tai/releases), unpack it and run the
+`get.sh` inside it: it installs the files next to it instead of downloading.
 
 ## Build & run
 
@@ -127,7 +164,7 @@ The webview build additionally needs GTK and WebKit headers
 why it is opt-in — it turns on cgo, whereas the default build is pure Go and
 cross-compiles to Windows unchanged.
 
-## Install (Linux desktop)
+## Install from source (Linux desktop)
 
 `install.sh` builds everything and registers webssh in the application menu:
 
@@ -164,6 +201,22 @@ the `Include` line. Unmounting comes first on purpose — deleting a directory
 while an sshfs mount is live would delete files on the remote host. If you only
 want the launcher gone, `make uninstall-desktop` still does just that.
 
+(`uninstall.sh` drives `make`, so it is for source installs. A prebuilt one is
+removed with `get.sh --uninstall`.)
+
+## Releases
+
+```sh
+make dist              # one archive for this machine's architecture
+make dist-all          # amd64 + arm64 + SHA256SUMS covering both
+```
+
+Each archive is `dist/webssh-<tag>-linux-<arch>.tar.gz` and holds the binary,
+the icons, the `.desktop` template and `get.sh` itself, which is what makes it
+installable offline. Publishing a release means tagging, running `make dist-all`
+on a clean checkout of that tag, and attaching both archives **and**
+`SHA256SUMS` — `get.sh` refuses to install without the checksums file.
+
 ## Icons
 
 All icons are rendered from one master, `assets/icon.svg`, by `assets/gen-icons.sh`
@@ -190,7 +243,8 @@ commands are Linux ones, so it does not run there yet.
   `backup`.
 - `web/` — Svelte + Vite SPA, embedded into the binary via `web/embed.go`.
 - `assets/` — master `icon.svg` and the script that renders every raster size.
-- `packaging/` — `.desktop` template used by `make install-desktop`.
+- `packaging/` — `.desktop` template used by `make install-desktop` and `get.sh`.
+- `get.sh` — the one-line installer for a prebuilt release (also removes it).
 - `winres/` — resource manifest for the Windows icon and version info.
 
 ## Roadmap
