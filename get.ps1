@@ -49,15 +49,26 @@ function Test-IsAdmin {
 }
 
 function Test-WslReady {
-    # wsl.exe writes to stderr and exits non-zero when WSL isn't installed;
-    # $PSNativeCommandUseErrorActionPreference above keeps that from being
-    # treated as a terminating error, so it's safe to just check the exit code.
-    $null = & wsl.exe --status 2>$null
-    return $LASTEXITCODE -eq 0
+    # wsl.exe writes to stderr and exits non-zero when WSL isn't installed —
+    # exactly the case this function exists to detect. Depending on
+    # PowerShell version/host, that can surface as a terminating exception
+    # instead of just a non-zero $LASTEXITCODE even with stderr redirected
+    # away and $PSNativeCommandUseErrorActionPreference disabled above; catch
+    # it too rather than relying on one specific mechanism to suppress it.
+    try {
+        $null = & wsl.exe --status 2>$null
+        return $LASTEXITCODE -eq 0
+    } catch {
+        return $false
+    }
 }
 
 function Get-WslDistros {
-    $out = & wsl.exe -l -q 2>$null
+    try {
+        $out = & wsl.exe -l -q 2>$null
+    } catch {
+        return @()
+    }
     if ($LASTEXITCODE -ne 0) { return @() }
     # Windows PowerShell 5.1 misreads wsl.exe's UTF-16LE console output and
     # interleaves NUL bytes between characters; strip them before trimming.
