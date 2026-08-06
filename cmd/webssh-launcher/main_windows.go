@@ -45,10 +45,15 @@ func main() {
 	}
 
 	cmd := exec.Command("wsl.exe", "-d", distro, "-u", "root", "--", "/root/.local/bin/webssh", "--no-open")
-	// This process has no console of its own (-H=windowsgui); without
-	// HideWindow, Windows would give its console-subsystem child (wsl.exe)
-	// a brand new console window to make up for that.
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	// TODO(windows-support): HideWindow (CREATE_NO_WINDOW) temporarily removed
+	// to test a theory: the Terminal button's later interop launch of
+	// powershell.exe/cmd.exe inside this same WSL session gets no window at
+	// all, while explorer.exe (a GUI app, no console needed) works fine — this
+	// smells like CREATE_NO_WINDOW on this wsl.exe poisons console-window
+	// creation for the whole interop session, not just this process. If
+	// removing it fixes Terminal, put back a console *hidden after creation*
+	// (GetConsoleWindow + ShowWindow(SW_HIDE)) instead of never allocating one,
+	// so this flash and the Terminal button can both be fixed at once.
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		showError("could not start webssh: " + err.Error())
