@@ -107,6 +107,29 @@ Linux x86-64 and arm64. The release binary is static (`CGO_ENABLED=0`), so it
 does not care about your libc, and it covers the `browser` and `app` modes; the
 native `webview` window needs cgo and webkit at build time and is source-only.
 
+Windows has no working native build yet — `internal/pty` has no real ConPTY
+backend, so the web terminal cannot start a shell. Until that lands, run it
+under **WSL** instead: install a distro (`wsl --install`), then run the same
+one-liner inside it. Everything — the pty, sshfs, ping, the install script —
+is plain Linux there, so nothing in this README changes; run with `--no-open`
+though, since a bare WSL distro has no browser for the default `app` mode to
+find (and you don't need to install one there) — just open the printed
+`http://127.0.0.1:8022/?token=…` URL in whatever browser you already have on
+Windows; WSL2 forwards localhost to it automatically.
+
+`get.ps1` automates that: it checks whether WSL and a distro are present,
+installs whichever is missing (asking to be re-run after a reboot if Windows
+needs one), then runs `get.sh` inside it. Installing WSL for the first time
+needs administrator rights; webssh itself does not, afterwards.
+
+Download and double-click [`get.bat`](get.bat) to run it without opening
+PowerShell yourself — it requests elevation through the normal UAC prompt only
+when WSL still needs installing. Or, from PowerShell directly:
+
+```powershell
+irm https://raw.githubusercontent.com/maxx1980/tai/main/get.ps1 | iex
+```
+
 Re-running the one-liner upgrades in place — it is also what the Update tab
 tells a prebuilt install to do, since there is no checkout there to rebuild.
 Prefer to install offline? Download the `.tar.gz` from the
@@ -237,7 +260,9 @@ make build-windows    # go-winres builds the .syso, then GOOS=windows go build
 
 That produces `webssh.exe` with the icon and version info embedded. Note it only
 *builds* — the pty layer is a stub on Windows and the default terminal/mount
-commands are Linux ones, so it does not run there yet.
+commands are Linux ones, so it does not run there yet. Run it under WSL
+instead (see [Install](#install-prebuilt-binary)) until a real ConPTY backend
+lands.
 
 ## Layout
 
@@ -250,9 +275,12 @@ commands are Linux ones, so it does not run there yet.
 - `assets/` — master `icon.svg` and the script that renders every raster size.
 - `packaging/` — `.desktop` template used by `make install-desktop` and `get.sh`.
 - `get.sh` — the one-line installer for a prebuilt release (also removes it).
+- `get.ps1` — Windows installer: sets up WSL and a distro, then runs `get.sh` in it.
+- `get.bat` — double-click launcher for `get.ps1`, self-elevating via UAC when needed.
 - `winres/` — resource manifest for the Windows icon and version info.
 
 ## Roadmap
 
 Port forwarding (local/remote/SOCKS) with a tunnel monitor, broadcast commands,
-command palette, Ansible/PuTTY import.
+command palette, Ansible/PuTTY import, and native Windows support (needs a
+ConPTY-backed `internal/pty`; run it under WSL until then).
