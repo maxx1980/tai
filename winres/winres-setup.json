@@ -31,5 +31,15 @@
         }
       }
     }
+  },
+  "RT_MANIFEST": {
+    "#1": {
+      "0409": {
+        "description": "webssh installer",
+        "minimum-os": "win10",
+        "execution-level": "",
+        "dpi-awareness": "per monitor v2"
+      }
+    }
   }
 }
