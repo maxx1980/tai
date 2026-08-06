@@ -75,11 +75,18 @@ func DecodeText(b []byte) string {
 	return string(utf16.Decode(u16))
 }
 
-// InstallDistro runs `wsl --install -d name` with output going straight to
-// this process's console - wsl.exe's own progress output is the feedback the
-// user needs to see while it downloads and installs.
+// InstallDistro runs `wsl --install -d name --no-launch`, with output going
+// straight to this process's console - wsl.exe's own progress output is the
+// feedback the user needs to see while it downloads and installs.
+//
+// --no-launch matters: without it, wsl.exe launches the distro once install
+// finishes to run its first-boot setup, which is an interactive wizard for
+// creating a UNIX username and password - it reads/writes this process's
+// inherited console, and since nothing here can drive that prompt, install
+// just hangs waiting for a human. webssh only ever runs as root (see
+// DistroReady/get.sh's caller), so that default user is never needed.
 func InstallDistro(name string) {
-	cmd := exec.Command("wsl.exe", "--install", "-d", name)
+	cmd := exec.Command("wsl.exe", "--install", "-d", name, "--no-launch")
 	cmd.Stdout, cmd.Stderr, cmd.Stdin = os.Stdout, os.Stderr, os.Stdin
 	_ = cmd.Run()
 }
