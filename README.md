@@ -147,6 +147,11 @@ Either way, everything running inside WSL is plain Linux — the pty, sshfs,
 ping — so nothing else in this README changes; WSL2 forwards `127.0.0.1` to
 Windows automatically, which is what lets the token URL open directly in a
 Windows browser without anything extra installed inside the distro.
+`webssh-setup.exe` also installs `sshfs` inside the distro, and webssh
+detects it is running under WSL and points the Terminal/Files "system"
+buttons at Windows itself (`wsl.exe`/`explorer.exe` via WSL2 interop)
+instead of the Linux desktop commands — both work without touching
+Settings.
 
 Re-running the one-liner upgrades in place — it is also what the Update tab
 tells a prebuilt install to do, since there is no checkout there to rebuild.

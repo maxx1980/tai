@@ -4,6 +4,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Setting keys stored in the DB.
@@ -58,12 +59,34 @@ const (
 	KeyMasterPassword = "master_pw"
 )
 
+// runningUnderWSL reports whether the process is inside a WSL VM, checked via
+// the kernel release string (e.g. "5.15.90.1-microsoft-standard-WSL2") rather
+// than an env var, so it works regardless of how the process was launched.
+func runningUnderWSL() bool {
+	b, err := os.ReadFile("/proc/sys/kernel/osrelease")
+	return err == nil && strings.Contains(strings.ToLower(string(b)), "microsoft")
+}
+
 // Defaults returns the default value for a setting key.
 func Defaults(home string) map[string]string {
+	// {{alias}} {{user}} {{host}} {{port}} {{mountpoint}} are substituted at spawn time.
+	terminalCmd := "gnome-terminal -- ssh {{alias}}"
+	filesCmd := "xdg-open {{mountpoint}}"
+	if runningUnderWSL() {
+		// No desktop environment inside WSL — reach out to the Windows host
+		// instead via WSL2 interop (Win32 binaries are on PATH there). Assumes
+		// an apt-based distro with sshfs installed (webssh-setup.exe does
+		// this) and that {{mountpoint}} never contains spaces.
+		distro := os.Getenv("WSL_DISTRO_NAME")
+		if distro == "" {
+			distro = "Ubuntu"
+		}
+		terminalCmd = "cmd.exe /c start wsl.exe -d " + distro + " -u root -- ssh {{alias}}"
+		filesCmd = `bash -c 'explorer.exe "$(wslpath -w {{mountpoint}})"'`
+	}
 	return map[string]string{
-		// {{alias}} {{user}} {{host}} {{port}} {{mountpoint}} are substituted at spawn time.
-		KeyTerminalCmd: "gnome-terminal -- ssh {{alias}}",
-		KeyFilesCmd:    "xdg-open {{mountpoint}}",
+		KeyTerminalCmd: terminalCmd,
+		KeyFilesCmd:    filesCmd,
 		// Empty means "use the system default browser" (xdg-open / open / rundll32).
 		// A custom command may use the {{url}} placeholder, else the URL is appended.
 		KeyBrowserCmd:      "",

@@ -89,7 +89,14 @@ func main() {
 	// -u root sidesteps the interactive first-launch username/password wizard
 	// a brand-new distro would otherwise show, and webssh needs nothing a
 	// non-root user would give it that root does not already have.
-	installCmd := fmt.Sprintf("curl -fsSL %s | bash", getShURL)
+	// Best-effort sshfs install (needed for the Files "system"/Mount button):
+	// wrapped in `|| true` so a non-apt distro or a flaky mirror never blocks
+	// the webssh install itself.
+	installCmd := fmt.Sprintf(
+		"(command -v apt-get >/dev/null 2>&1 && apt-get update -qq && "+
+			"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sshfs || true) && "+
+			"curl -fsSL %s | bash",
+		getShURL)
 	if err := wslutil.RunChecked("wsl.exe", "-d", distro, "-u", "root", "--", "bash", "-lc", installCmd); err != nil {
 		fail(fmt.Sprintf("webssh install failed inside WSL: %v", err))
 	}
