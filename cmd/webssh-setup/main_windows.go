@@ -99,11 +99,6 @@ func main() {
 	// Best-effort sshfs install (needed for the Files "system"/Mount button):
 	// wrapped in `|| true` so a non-apt distro or a flaky mirror never blocks
 	// the webssh install itself.
-	// TODO(windows-support): --version pins installs to the windows-setup-test
-	// prerelease, which is the only place the WSL-aware config.go defaults
-	// have been published so far (the real "latest" release predates this
-	// branch). Drop this pin once windows-support merges to main and a real
-	// release carries the fix.
 	// user_allow_other lets a non-root caller (which is how \\wsl$\ may reach
 	// the distro) use sshfs's -o allow_other; root itself doesn't need this,
 	// but it costs nothing to enable and removes one variable when \\wsl$\
@@ -113,7 +108,7 @@ func main() {
 			"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sshfs || true) && "+
 			"(grep -q '^user_allow_other' /etc/fuse.conf 2>/dev/null || "+
 			"echo user_allow_other >> /etc/fuse.conf) && "+
-			"curl -fsSL %s | bash -s -- --version windows-setup-test",
+			"curl -fsSL %s | bash",
 		getShURL)
 	if err := wslutil.RunChecked("wsl.exe", "-d", distro, "-u", "root", "--", "bash", "-lc", installCmd); err != nil {
 		fail(fmt.Sprintf("webssh install failed inside WSL: %v", err))
