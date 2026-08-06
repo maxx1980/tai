@@ -1,6 +1,11 @@
 .PHONY: all ui build build-webview run clean deps dev icons syso build-windows install-desktop uninstall-desktop
 
 BINARY := webssh
+# VERSION is stamped into the binary so the updater can compare it with the
+# newest tag on GitHub. A build from a tarball (no .git) has no version; the
+# updater then reports "dev" and never offers an update it cannot reason about.
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -X webssh/internal/version.Version=$(VERSION)
 # go-winres declares an older go directive, so `go run pkg@ver` would fall back to
 # whatever toolchain is on PATH; pin it to the one this module already builds with.
 WINRES := GOTOOLCHAIN=$(shell go env GOVERSION) go run github.com/tc-hib/go-winres@v0.3.3
@@ -22,13 +27,13 @@ ui: icons
 
 # build compiles the SPA then the Go binary (which embeds web/dist).
 build: ui
-	go build -o $(BINARY) ./cmd/webssh
+	go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/webssh
 
 # build-webview links the embedded webkit2gtk window into the binary. It needs
 # cgo and the webkit headers (Debian/Deepin: libgtk-3-dev libwebkit2gtk-4.0-dev),
 # which is why it is not the default build.
 build-webview: ui
-	go build -tags webview -o $(BINARY) ./cmd/webssh
+	go build -tags webview -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/webssh
 
 # syso builds the Windows resource object; the Go linker picks up any *.syso
 # next to package main automatically when GOOS=windows.
@@ -36,7 +41,7 @@ syso: icons
 	$(WINRES) make --arch amd64 --in winres/winres.json --out cmd/webssh/rsrc
 
 build-windows: ui syso
-	GOOS=windows GOARCH=amd64 go build -o $(BINARY).exe ./cmd/webssh
+	GOOS=windows GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(BINARY).exe ./cmd/webssh
 
 # run builds everything and starts the server (opens the browser).
 run: build

@@ -8,7 +8,7 @@
     resetAll,
     ApiError,
   } from "./api";
-  import { app, lock, refresh, checkLock, notify } from "./store.svelte";
+  import { app, lock, refresh, checkLock, notify, update, refreshUpdate } from "./store.svelte";
 
   let form = $state({ ...app.settings });
   let busy = $state(false);
@@ -179,6 +179,18 @@
     }
   }
 
+  // checkNow forces a fresh look at GitHub. The Update tab only appears when
+  // there is something to install, so this is the way to ask on demand — and
+  // the only place that reports "you are already current".
+  async function checkNow() {
+    await refreshUpdate(true);
+    const i = update.info;
+    if (!i) notify("error", "Could not reach GitHub");
+    else if (i.available) notify("success", `${i.latest} is available — see the Update tab`);
+    else if (i.blocker) notify("info", i.blocker);
+    else notify("success", "You are running the newest version");
+  }
+
   async function importConfig(path?: string) {
     busy = true;
     try {
@@ -322,6 +334,18 @@
       Restart relaunches the daemon and reopens the app in your browser
       (per the browser command). This tab briefly loses connection.
     </span>
+
+    <hr />
+
+    <div class="row" style="flex-wrap:wrap; align-items:center">
+      <span class="muted" style="font-size:12px">
+        Version <span class="mono">{app.version || "unknown"}</span>
+      </span>
+      <div class="spacer"></div>
+      <button onclick={checkNow} disabled={busy || update.checking}>
+        {update.checking ? "Checking…" : "Check for updates"}
+      </button>
+    </div>
   </section>
 
   <section>

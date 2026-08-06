@@ -678,9 +678,9 @@ type KeyExport struct {
 // reconstruct the inventory, keys and settings on another machine. Host.Password
 // is populated (backups are encrypted). The master-password hash is excluded.
 type Snapshot struct {
-	Version  int               `json:"version"`
-	Groups   []Group           `json:"groups"`
-	Hosts    []Host            `json:"hosts"`
+	Version    int               `json:"version"`
+	Groups     []Group           `json:"groups"`
+	Hosts      []Host            `json:"hosts"`
 	Keys       []KeyExport       `json:"keys"`
 	HostKeys   [][2]int64        `json:"host_keys"` // {key_id, host_id}
 	KnownHosts []KnownHost       `json:"known_hosts"`
@@ -851,6 +851,21 @@ func (s *Store) ResetAll() error {
 		}
 	}
 	return tx.Commit()
+}
+
+// SnapshotTo writes a complete copy of the database to path. It uses SQLite's
+// VACUUM INTO rather than copying the file, because the daemon holds the DB
+// open in WAL mode: a plain copy can catch a checkpoint mid-flight and produce
+// a snapshot that is missing the newest writes. path must not already exist —
+// SQLite refuses to overwrite, which is the behaviour we want for a backup.
+//
+// The snapshot holds everything in the DB, saved passwords included, so it
+// inherits the data directory's 0700 and is never served over the API.
+func (s *Store) SnapshotTo(path string) error {
+	if _, err := s.db.Exec("VACUUM INTO ?", path); err != nil {
+		return fmt.Errorf("snapshot database: %w", err)
+	}
+	return nil
 }
 
 // Ping verifies the DB is reachable.

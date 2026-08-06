@@ -132,6 +132,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		"known_hosts": knownHosts,
 		"settings":    settings,
 		"mounts":      mounts,
+		"version":     currentVersion(),
 	})
 }
 

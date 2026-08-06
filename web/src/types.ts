@@ -135,6 +135,9 @@ export interface AppState {
   known_hosts: KnownHost[];
   settings: Record<string, string>;
   mounts: Mount[];
+  // The running build, as `git describe` saw it at compile time — shown in
+  // Settings and used as the "from" side of an update.
+  version: string;
 }
 
 export function emptyHost(): Host {

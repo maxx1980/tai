@@ -28,6 +28,7 @@ import (
 	"webssh/internal/health"
 	"webssh/internal/sftpbrowse"
 	"webssh/internal/store"
+	"webssh/internal/update"
 )
 
 // Server holds shared dependencies for the HTTP handlers.
@@ -39,6 +40,10 @@ type Server struct {
 	sftp   *sftpbrowse.Manager
 	health *health.Checker
 	mux    *http.ServeMux
+
+	// updates compares this build with the newest tag on GitHub and, on
+	// request, rebuilds the working copy in place.
+	updates *update.Updater
 
 	authDisabled atomic.Bool // when true, the API-key check is skipped (user opt-in)
 
@@ -72,6 +77,7 @@ func New(st *store.Store, paths config.Paths, token string, assets fs.FS, hc *he
 		assets:   assets,
 		sftp:     sftpbrowse.NewManager(paths.Home, filepath.Join(paths.DataDir, "keys")),
 		health:   hc,
+		updates:  update.New(),
 		mux:      http.NewServeMux(),
 		sessions: map[string]struct{}{},
 		quit:     make(chan struct{}),
@@ -175,6 +181,12 @@ func (s *Server) routes() {
 
 	api("POST /api/lock", s.handleLock)
 	api("POST /api/restart", s.handleRestart)
+
+	// Self-update: compare with GitHub, then rebuild the working copy in place.
+	api("GET /api/update/check", s.handleUpdateCheck)
+	api("GET /api/update/status", s.handleUpdateStatus)
+	api("POST /api/update/run", s.handleUpdateRun)
+
 	api("PUT /api/settings/password", s.handleSetPassword)
 	api("POST /api/backup", s.handleBackup)
 	api("POST /api/restore", s.handleRestore)

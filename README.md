@@ -41,6 +41,11 @@ terminal is included as a fallback for remote use.
   terminal, your system terminal, both or neither, and likewise the web SFTP
   browser, your file manager (which carries Mount/Unmount) or neither. Telnet
   always stays: it has no native counterpart.
+- **In-place update** — the panel compares its build with the newest tag on
+  GitHub; when one is newer, an Update tab appears left of Inventory. It offers
+  to copy the database first, then fetches the tag into your checkout, rebuilds
+  and restarts. Needs the same tools the install did (go, npm, make,
+  rsvg-convert) and a clean working copy.
 - **Health checks** — background probes colour each host green (its port is
   open), yellow (answers ping only) or red (unreachable).
 - **Master password** — optional gate over the whole panel, plus encrypted

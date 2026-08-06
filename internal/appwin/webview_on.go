@@ -6,6 +6,10 @@ import (
 	webview "github.com/webview/webview_go"
 )
 
+// HasWebview tells the updater which make target rebuilt this binary, so an
+// in-place update does not silently drop the native window the user chose.
+const HasWebview = true
+
 // webviewUI is a native webkit2gtk window hosting the SPA, so no browser is
 // involved at all.
 type webviewUI struct {

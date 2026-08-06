@@ -1,4 +1,5 @@
-import { api, ApiError, lockstate } from "./api";
+import { api, ApiError, lockstate, checkUpdate } from "./api";
+import type { UpdateInfo } from "./api";
 import type { AppState } from "./types";
 
 // Central reactive application state (Svelte 5 runes). Named `app` (not `state`)
@@ -11,6 +12,7 @@ export const app = $state<AppState>({
   known_hosts: [],
   settings: {},
   mounts: [],
+  version: "",
 });
 
 // Master-password lock gate. `unlocked` starts true so the app renders normally
@@ -59,6 +61,31 @@ export async function refresh(): Promise<void> {
   app.known_hosts = s.known_hosts ?? [];
   app.settings = s.settings ?? {};
   app.mounts = s.mounts ?? [];
+  app.version = s.version ?? "";
+}
+
+// ---- self-update ----
+
+// The last version check. It is kept out of AppState and off refresh()'s path
+// on purpose: it costs a round-trip to GitHub, and a rate-limited or offline
+// check must never delay or break loading the inventory.
+export const update = $state<{ info: UpdateInfo | null; checking: boolean }>({
+  info: null,
+  checking: false,
+});
+
+// refreshUpdate populates that state. Failures are swallowed: with no answer
+// from GitHub the Update tab simply stays hidden, which is the right outcome
+// for a machine that is offline or behind a proxy.
+export async function refreshUpdate(force = false): Promise<void> {
+  update.checking = true;
+  try {
+    update.info = await checkUpdate(force);
+  } catch {
+    // leave whatever we knew before
+  } finally {
+    update.checking = false;
+  }
 }
 
 // ---- toast notifications ----

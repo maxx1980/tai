@@ -1,18 +1,19 @@
 <script lang="ts">
-  import { app, lock, refresh, refreshHealth, checkLock, notify } from "./store.svelte";
+  import { app, lock, refresh, refreshHealth, checkLock, notify, update, refreshUpdate } from "./store.svelte";
   import { lock as apiLock } from "./api";
   import { emptyHost, type Host } from "./types";
   import Inventory from "./Inventory.svelte";
   import KeysPanel from "./KeysPanel.svelte";
   import KnownHostsPanel from "./KnownHostsPanel.svelte";
   import SettingsPanel from "./SettingsPanel.svelte";
+  import UpdatePanel from "./UpdatePanel.svelte";
   import HostEditor from "./HostEditor.svelte";
   import Terminal from "./Terminal.svelte";
   import FileBrowser from "./FileBrowser.svelte";
   import UnlockScreen from "./UnlockScreen.svelte";
   import Toasts from "./Toasts.svelte";
 
-  type View = "inventory" | "keys" | "known-hosts" | "settings";
+  type View = "update" | "inventory" | "keys" | "known-hosts" | "settings";
   let view = $state<View>("inventory");
   let editing = $state<Host | null>(null);
   // The web terminal runs either ssh or telnet, chosen by the card button.
@@ -26,6 +27,14 @@
       .then(() => refresh())
       .then(() => (loaded = true))
       .catch((e) => notify("error", "Failed to load: " + e));
+  });
+
+  // Ask GitHub whether a newer version is tagged, once the panel is unlocked.
+  // Only a positive answer surfaces anything (the Update tab), so a machine
+  // that is offline or rate-limited simply sees the interface it always had.
+  $effect(() => {
+    if (!loaded || !lock.unlocked) return;
+    refreshUpdate();
   });
 
   // Poll host reachability every 60s once loaded and unlocked; the backend
@@ -61,6 +70,16 @@
   <header>
     <div class="brand">🔐 webssh</div>
     <nav>
+      {#if update.info?.available}
+        <button
+          class="upd"
+          class:active={view === "update"}
+          onclick={() => (view = "update")}
+          title="{update.info.latest} is available"
+        >
+          ⬆ Update
+        </button>
+      {/if}
       <button class:active={view === "inventory"} onclick={() => (view = "inventory")}
         >Inventory</button
       >
@@ -82,6 +101,8 @@
   <div class="content">
     {#if !loaded}
       <p class="muted">Loading…</p>
+    {:else if view === "update"}
+      <div class="scroll pad"><UpdatePanel /></div>
     {:else if view === "inventory"}
       <Inventory
         onNewHost={() => (editing = emptyHost())}
@@ -137,6 +158,8 @@
   nav { display: flex; gap: 4px; }
   nav button { background: transparent; border: none; padding: 6px 12px; color: var(--muted); }
   nav button.active { color: var(--text); background: var(--panel-2); }
+  /* The one nav entry that appears on its own, so it says why it is there. */
+  nav button.upd { color: var(--accent); font-weight: 600; }
   .content { flex: 1; min-height: 0; padding: 16px 18px; }
   .pad { height: 100%; }
   .term-overlay {

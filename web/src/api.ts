@@ -178,6 +178,41 @@ export const restore = (dataText: string, password: string) =>
 export const resetAll = (password: string) =>
   request<{ ok: boolean }>("POST", "/api/reset", { body: { password } });
 
+// ---- Self-update ----
+
+export interface UpdateInfo {
+  current: string;
+  latest: string;
+  available: boolean;
+  can_update: boolean;
+  blocker?: string;
+  source_dir?: string;
+  repo?: string;
+  notes_url?: string;
+  checked_at: string;
+}
+
+export interface UpdateStatus {
+  state: "idle" | "running" | "done" | "error";
+  step: string;
+  log: string[];
+  error?: string;
+  target?: string;
+  backup?: string;
+}
+
+// checkUpdate asks the daemon to compare this build with the newest tag on
+// GitHub. force skips the server-side cache (GitHub rate-limits by address).
+export const checkUpdate = (force = false) =>
+  api.get<UpdateInfo>(`/api/update/check${force ? "?force=1" : ""}`);
+
+// updateStatus is polled while an update runs: the rebuild takes minutes, so
+// runUpdate only starts it and the log arrives here.
+export const updateStatus = () => api.get<UpdateStatus>("/api/update/status");
+
+export const runUpdate = (tag: string, backup: boolean) =>
+  api.post<UpdateStatus>("/api/update/run", { tag, backup });
+
 // terminalURL builds the websocket URL (token as query param) for a host.
 // shell selects which client the daemon runs: ssh (default) or telnet.
 export function terminalURL(hostId: number, shell: "ssh" | "telnet" = "ssh"): string {
