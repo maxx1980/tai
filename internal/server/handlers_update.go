@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -118,24 +116,10 @@ func (s *Server) checkBackupPassword(pw string) (int, error) {
 // through the same code — from the list of backups, or from disk on another
 // machine.
 func (s *Server) snapshotBackup(password, tag string) (string, error) {
-	dir := s.backupsDir()
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
-	}
-	enc, err := s.exportEncrypted(password)
-	if err != nil {
-		return "", err
-	}
 	// The tag being installed goes in the name: which version this was taken
 	// ahead of is the first thing you want to know when rolling back.
 	name := fmt.Sprintf("webssh-%s-before-%s.enc", time.Now().Format("20060102-150405"), safeName(tag))
-	path := filepath.Join(dir, name)
-	// It holds saved host passwords and private keys — encrypted, but the file
-	// mode costs nothing and the directory is 0700 already.
-	if err := os.WriteFile(path, enc, 0o600); err != nil {
-		return "", err
-	}
-	return path, nil
+	return s.saveBackup(password, name)
 }
 
 // safeName keeps a git tag usable as part of a file name. Tags are tame in

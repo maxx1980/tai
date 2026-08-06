@@ -143,8 +143,11 @@
   async function doBackup() {
     busy = true;
     try {
-      await backup(opPw);
-      notify("success", "Encrypted backup downloaded");
+      const f = await backup(opPw);
+      // It went to disk, not to the browser, so point at where it landed —
+      // the list below refreshes with it at the top.
+      await loadBackups();
+      notify("success", `Saved ${f.name} — see Backups on this machine`);
       modal = null;
     } catch (e) {
       notify("error", e instanceof ApiError ? e.message : String(e));
@@ -462,14 +465,15 @@
     <h3>Security &amp; backup</h3>
     <p class="muted">
       The master password locks this panel and encrypts backups. A backup contains your whole
-      inventory — hosts, saved passwords, keys and settings — encrypted with that password.
+      inventory — hosts, saved passwords, keys and settings — encrypted with that password, and is
+      kept in the list below, where updates leave theirs too.
     </p>
     <div class="row" style="flex-wrap:wrap">
       <button onclick={() => openModal("password")} disabled={busy}>
         {lock.has_password ? "Change password" : "Set password"}
       </button>
       <button onclick={() => openModal("backup")} disabled={busy || !lock.has_password}>
-        Backup…
+        Back up now…
       </button>
       <button onclick={() => openModal("restore")} disabled={busy}>Restore…</button>
       <button class="danger ghost" onclick={() => openModal("reset")}
@@ -485,9 +489,10 @@
 
     <h3>Backups on this machine</h3>
     <p class="muted">
-      Every update saves one of these first, encrypted the same way. Restoring
-      <strong>replaces</strong> everything with the file's contents — that is the rollback if a
-      new version turns out badly.
+      Both <em>Back up now</em> and every update leave a file here, encrypted the same way.
+      Restoring <strong>replaces</strong> everything with the file's contents — that is the
+      rollback if a new version turns out badly. Download keeps a copy off this disk; nothing is
+      deleted on its own.
     </p>
     {#if stored.length === 0}
       <p class="muted" style="margin-bottom:0">
@@ -595,18 +600,26 @@
   <div class="overlay" onclick={() => (modal = null)}>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="modal" onclick={(e) => e.stopPropagation()}>
-      <h2>Backup</h2>
+      <h2>Back up now</h2>
       <p class="muted" style="margin-top:0">
-        Enter your master password to download an encrypted backup file.
+        Enter your master password to save an encrypted backup into
+        <span class="mono">~/.local/share/webssh/backups</span>, where updates leave theirs. It
+        appears in the list below, ready to restore or download.
       </p>
       <div class="field">
         <label for="bpw">Master password</label>
-        <input id="bpw" type="password" bind:value={opPw} autocomplete="current-password" />
+        <input
+          id="bpw"
+          type="password"
+          bind:value={opPw}
+          autocomplete="current-password"
+          onkeydown={(e) => e.key === "Enter" && opPw && !busy && doBackup()}
+        />
       </div>
       <div class="row">
         <div class="spacer"></div>
         <button onclick={() => (modal = null)}>Cancel</button>
-        <button class="primary" onclick={doBackup} disabled={busy || !opPw}>Download backup</button>
+        <button class="primary" onclick={doBackup} disabled={busy || !opPw}>Save backup</button>
       </div>
     </div>
   </div>

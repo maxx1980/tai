@@ -178,8 +178,12 @@ func (s *Server) restoreEncrypted(password string, data []byte) (*store.Snapshot
 	return &snap, 200, nil
 }
 
-// handleBackup verifies the master password and streams an encrypted dump of the
-// entire store (inventory, saved passwords, keys with private files, settings).
+// handleBackup verifies the master password and writes an encrypted dump of the
+// entire store (inventory, saved passwords, keys with private files, settings)
+// into the backups directory — the same file, in the same place, as the snapshot
+// the updater takes before it rebuilds. It answers with the entry rather than
+// the bytes: keeping the copy on this machine is what makes it a rollback, and
+// downloading it is one click away in the list.
 func (s *Server) handleBackup(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Password string `json:"password"`
@@ -198,16 +202,17 @@ func (s *Server) handleBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	enc, err := s.exportEncrypted(body.Password)
+	name := fmt.Sprintf("webssh-%s.enc", time.Now().Format("20060102-150405"))
+	path, err := s.saveBackup(body.Password, name)
 	if err != nil {
 		writeErr(w, 500, err)
 		return
 	}
-	name := fmt.Sprintf("webssh-backup-%s.enc", time.Now().Format("20060102-150405"))
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Disposition", "attachment; filename=\""+name+"\"")
-	w.WriteHeader(200)
-	_, _ = w.Write(enc)
+	made, size := time.Now(), int64(0)
+	if fi, serr := os.Stat(path); serr == nil {
+		made, size = fi.ModTime(), fi.Size()
+	}
+	writeJSON(w, 200, backupFile{Name: name, Size: size, Made: made})
 }
 
 // handleRestore decrypts an uploaded backup (sent as JSON text, not multipart)

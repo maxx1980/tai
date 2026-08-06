@@ -143,30 +143,10 @@ export const setMasterPassword = (current: string, next: string) =>
     body: { current, new: next },
   });
 
-// backup verifies the password server-side and downloads the encrypted dump.
-export async function backup(password: string): Promise<void> {
-  const res = await netFetch("/api/backup", {
-    method: "POST",
-    headers: { "X-Auth-Token": token(), "Content-Type": "application/json" },
-    body: JSON.stringify({ password }),
-  });
-  if (!res.ok) {
-    const t = await res.text();
-    throw new ApiError(res.status, t ? JSON.parse(t) : {});
-  }
-  const cd = res.headers.get("Content-Disposition") || "";
-  const m = cd.match(/filename="?([^"]+)"?/);
-  const name = m ? m[1] : "webssh-backup.enc";
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
+// backup verifies the password server-side and saves an encrypted dump into
+// ~/.local/share/webssh/backups, next to the ones the updater takes. It comes
+// back as a list entry, not as a file: downloading it is downloadBackup below.
+export const backup = (password: string) => api.post<BackupFile>("/api/backup", { password });
 
 // restore sends the backup file's text (read in-browser, no multipart) + password.
 export const restore = (dataText: string, password: string) =>

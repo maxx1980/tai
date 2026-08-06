@@ -47,10 +47,11 @@ terminal is included as a fallback for remote use.
   rebuilds and restarts. Needs the same tools the install did (go, npm, make,
   rsvg-convert) and a clean working copy. A prebuilt install has no checkout to
   rebuild, so the tab shows the one-line installer to re-run instead.
-- **Rollback** — pre-update backups are the same encrypted format the Backup
-  button produces, kept in `~/.local/share/webssh/backups`. Settings lists them
-  and restores, downloads or deletes any of them, so a bad version can be
-  undone: restore the data there, then check the old tag out and rebuild.
+- **Rollback** — every backup lands in `~/.local/share/webssh/backups`, the ones
+  taken before an update and the ones the Backup button makes, in the same
+  encrypted format. Settings lists them and restores, downloads or deletes any
+  of them, so a bad version can be undone: restore the data there, then check
+  the old tag out and rebuild.
 - **Health checks** — background probes colour each host green (its port is
   open), yellow (answers ping only) or red (unreachable).
 - **Master password** — optional gate over the whole panel, plus encrypted

@@ -40,6 +40,28 @@ func (s *Server) backupPath(name string) (string, error) {
 	return filepath.Join(s.backupsDir(), name), nil
 }
 
+// saveBackup seals the store with password and writes it into the backups
+// directory under name. Every backup webssh makes lands here — the one the
+// Backup button asks for and the one the updater takes before a rebuild — so
+// there is a single place to look when something has to be rolled back.
+func (s *Server) saveBackup(password, name string) (string, error) {
+	dir := s.backupsDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	enc, err := s.exportEncrypted(password)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, name)
+	// It holds saved host passwords and private keys — encrypted, but the file
+	// mode costs nothing and the directory is 0700 already.
+	if err := os.WriteFile(path, enc, 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
 // handleListBackups lists the backups on this machine, newest first.
 func (s *Server) handleListBackups(w http.ResponseWriter, r *http.Request) {
 	entries, err := os.ReadDir(s.backupsDir())
