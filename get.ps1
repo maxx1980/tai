@@ -42,7 +42,11 @@ function Test-IsAdmin {
 }
 
 function Test-WslReady {
-    $null = & wsl.exe --status 2>&1
+    # Discard stderr on its own stream rather than merging it with 2>&1: when
+    # WSL isn't installed, wsl.exe writes exactly that to stderr, and merging
+    # wraps it as an ErrorRecord that $ErrorActionPreference = "Stop" turns
+    # into a crash instead of the non-zero exit code this function checks for.
+    $null = & wsl.exe --status 2>$null
     return $LASTEXITCODE -eq 0
 }
 
