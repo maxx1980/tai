@@ -192,6 +192,13 @@ func (s *Server) routes() {
 	api("POST /api/restore", s.handleRestore)
 	api("POST /api/reset", s.handleReset)
 
+	// Backups kept on this machine — the updater leaves one here before every
+	// rebuild, and this is how it gets restored again.
+	api("GET /api/backups", s.handleListBackups)
+	api("POST /api/backups/restore", s.handleRestoreBackup)
+	api("GET /api/backups/{name}", s.handleDownloadBackup)
+	api("DELETE /api/backups/{name}", s.handleDeleteBackup)
+
 	api("POST /api/hosts", s.handleCreateHost)
 	api("POST /api/hosts/bulk", s.handleBulkCreateHosts)
 	api("PUT /api/hosts/{id}", s.handleUpdateHost)

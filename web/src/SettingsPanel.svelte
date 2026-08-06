@@ -6,7 +6,12 @@
     backup,
     restore,
     resetAll,
+    listBackups,
+    restoreBackup,
+    deleteBackup,
+    downloadBackup,
     ApiError,
+    type BackupFile,
   } from "./api";
   import { app, lock, refresh, checkLock, notify, update, refreshUpdate } from "./store.svelte";
 
@@ -16,7 +21,14 @@
   let fileInput: HTMLInputElement;
 
   // ---- Security & backup ----
-  type SecModal = null | "password" | "backup" | "restore" | "reset" | "disableauth";
+  type SecModal =
+    | null
+    | "password"
+    | "backup"
+    | "restore"
+    | "reset"
+    | "disableauth"
+    | "rollback";
   let modal = $state<SecModal>(null);
   let curPw = $state("");
   let newPw = $state("");
@@ -27,6 +39,21 @@
   let resetConfirm = $state(false);
   let restoreInput: HTMLInputElement;
 
+  // Backups sitting in ~/.local/share/webssh/backups — mostly the snapshots the
+  // updater leaves behind, listed here because that is where a rollback starts.
+  let stored = $state<BackupFile[]>([]);
+  let rollbackTarget = $state<BackupFile | null>(null);
+
+  async function loadBackups() {
+    try {
+      stored = await listBackups();
+    } catch {
+      // A missing or unreadable backups directory is not worth a toast on every
+      // visit to Settings; the list simply stays empty.
+    }
+  }
+  loadBackups();
+
   function openModal(m: SecModal) {
     modal = m;
     curPw = "";
@@ -36,6 +63,57 @@
     restoreData = "";
     restoreName = "";
     resetConfirm = false;
+  }
+
+  function askRollback(f: BackupFile) {
+    openModal("rollback"); // clears the password fields, not the target
+    rollbackTarget = f;
+  }
+
+  async function doRollback() {
+    if (!rollbackTarget) return;
+    busy = true;
+    try {
+      const r = await restoreBackup(rollbackTarget.name, opPw);
+      await refresh();
+      await checkLock();
+      notify("success", `Restored ${r.hosts} host(s) and ${r.keys} key(s)`);
+      modal = null;
+    } catch (e) {
+      notify("error", e instanceof ApiError ? e.message : String(e));
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function doDeleteBackup(f: BackupFile) {
+    if (!confirm(`Delete ${f.name}? This cannot be undone.`)) return;
+    busy = true;
+    try {
+      await deleteBackup(f.name);
+      await loadBackups();
+      notify("success", "Backup deleted");
+    } catch (e) {
+      notify("error", e instanceof ApiError ? e.message : String(e));
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function doDownloadBackup(f: BackupFile) {
+    try {
+      await downloadBackup(f.name);
+      notify("success", `Saved ${f.name}`);
+    } catch (e) {
+      notify("error", e instanceof ApiError ? e.message : String(e));
+    }
+  }
+
+  // Sizes are shown next to a date, so one decimal is as much as helps.
+  function humanSize(n: number): string {
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / 1024 / 1024).toFixed(1)} MB`;
   }
 
   async function savePassword(remove: boolean) {
@@ -405,6 +483,46 @@
 
     <hr />
 
+    <h3>Backups on this machine</h3>
+    <p class="muted">
+      Every update saves one of these first, encrypted the same way. Restoring
+      <strong>replaces</strong> everything with the file's contents — that is the rollback if a
+      new version turns out badly.
+    </p>
+    {#if stored.length === 0}
+      <p class="muted" style="margin-bottom:0">
+        Nothing here yet. <span class="mono">~/.local/share/webssh/backups</span>
+      </p>
+    {:else}
+      <ul class="backups">
+        {#each stored as f (f.name)}
+          <li>
+            <div class="what">
+              <span class="mono name">{f.name}</span>
+              <span class="muted" style="font-size:11.5px">
+                {new Date(f.made).toLocaleString()} · {humanSize(f.size)}
+                {#if f.legacy}· plain database copy, not encrypted{/if}
+              </span>
+            </div>
+            <div class="row" style="gap:6px">
+              {#if f.legacy}
+                <!-- A whole SQLite file, not a snapshot this daemon can import. -->
+                <span class="muted" style="font-size:11.5px">restore by hand</span>
+              {:else}
+                <button onclick={() => askRollback(f)} disabled={busy}>Restore…</button>
+              {/if}
+              <button onclick={() => doDownloadBackup(f)} disabled={busy}>Download</button>
+              <button class="danger ghost" onclick={() => doDeleteBackup(f)} disabled={busy}>
+                Delete
+              </button>
+            </div>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+
+    <hr />
+
     <label class="pick">
       <input type="checkbox" style="width:auto" disabled={busy}
         checked={app.settings.exit_on_close !== "0"}
@@ -525,6 +643,34 @@
   </div>
 {/if}
 
+{#if modal === "rollback"}
+  <div class="overlay" onclick={() => (modal = null)}>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="modal" onclick={(e) => e.stopPropagation()}>
+      <h2>Roll back to this backup</h2>
+      <div class="warn">
+        ⚠ Restoring <strong>replaces</strong> all current hosts, keys and settings with what
+        <span class="mono">{rollbackTarget?.name}</span> holds, including the master password it
+        was taken with.
+      </div>
+      <p class="muted" style="margin-top:0">
+        Taken {rollbackTarget ? new Date(rollbackTarget.made).toLocaleString() : ""}. This
+        restores your data — it does not put the old binary back. To run the previous version
+        again, check its tag out in the source directory and rebuild.
+      </p>
+      <div class="field">
+        <label for="rbpw">Backup password</label>
+        <input id="rbpw" type="password" bind:value={opPw} autocomplete="current-password" />
+      </div>
+      <div class="row">
+        <div class="spacer"></div>
+        <button onclick={() => (modal = null)}>Cancel</button>
+        <button class="danger" onclick={doRollback} disabled={busy || !opPw}>Restore</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 {#if modal === "disableauth"}
   <div class="overlay" onclick={() => (modal = null)}>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -596,4 +742,18 @@
     margin-bottom: 12px;
   }
   .pick { display: flex; align-items: center; gap: 8px; margin: 4px 0 12px; color: var(--text); font-size: 13px; }
+  .backups { list-style: none; margin: 0 0 4px; padding: 0; display: grid; gap: 6px; }
+  .backups li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+  }
+  /* The name is the long part; let it shrink before the buttons wrap. */
+  .backups .what { flex: 1 1 220px; min-width: 0; }
+  .backups .name { display: block; font-size: 12.5px; overflow-wrap: anywhere; }
 </style>

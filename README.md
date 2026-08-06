@@ -43,10 +43,14 @@ terminal is included as a fallback for remote use.
   always stays: it has no native counterpart.
 - **In-place update** — the panel compares its build with the newest tag on
   GitHub; when one is newer, an Update tab appears left of Inventory. It offers
-  to copy the database first, then fetches the tag into your checkout, rebuilds
-  and restarts. Needs the same tools the install did (go, npm, make,
+  to save an encrypted backup first, then fetches the tag into your checkout,
+  rebuilds and restarts. Needs the same tools the install did (go, npm, make,
   rsvg-convert) and a clean working copy. A prebuilt install has no checkout to
   rebuild, so the tab shows the one-line installer to re-run instead.
+- **Rollback** — pre-update backups are the same encrypted format the Backup
+  button produces, kept in `~/.local/share/webssh/backups`. Settings lists them
+  and restores, downloads or deletes any of them, so a bad version can be
+  undone: restore the data there, then check the old tag out and rebuild.
 - **Health checks** — background probes colour each host green (its port is
   open), yellow (answers ping only) or red (unreachable).
 - **Master password** — optional gate over the whole panel, plus encrypted

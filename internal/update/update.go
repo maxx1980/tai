@@ -449,10 +449,10 @@ func (u *Updater) Status() Status {
 }
 
 // Start begins the update in the background and returns as soon as it is under
-// way. snapshot, when non-nil, is called first to save a database backup; if it
-// fails the update does not start, because the whole point of taking one is to
-// have it before anything changes.
-func (u *Updater) Start(tag string, snapshot func() (string, error)) error {
+// way. snapshot, when non-nil, is called first with the tag being installed and
+// saves an encrypted backup; if it fails the update does not start, because the
+// whole point of taking one is to have it before anything changes.
+func (u *Updater) Start(tag string, snapshot func(string) (string, error)) error {
 	dir, err := SourceDir()
 	if err != nil {
 		return err
@@ -486,14 +486,14 @@ func (u *Updater) Start(tag string, snapshot func() (string, error)) error {
 	return nil
 }
 
-func (u *Updater) steps(dir, tag string, snapshot func() (string, error)) error {
+func (u *Updater) steps(dir, tag string, snapshot func(string) (string, error)) error {
 	if missing := missingTools(); len(missing) > 0 {
 		return errors.New("missing build tools: " + strings.Join(missing, ", "))
 	}
 
 	if snapshot != nil {
-		u.step("backup", "saving a copy of the database")
-		path, err := snapshot()
+		u.step("backup", "saving an encrypted backup")
+		path, err := snapshot(tag)
 		if err != nil {
 			return fmt.Errorf("backup failed, nothing was changed: %w", err)
 		}

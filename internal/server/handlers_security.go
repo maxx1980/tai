@@ -103,6 +103,81 @@ func (s *Server) handleSetPassword(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]bool{"has_password": true})
 }
 
+// exportEncrypted seals a dump of the whole store — inventory, saved passwords,
+// keys with their private-key files, settings — with password. Every backup
+// webssh produces goes through here: the download below and the snapshot the
+// updater takes before it rebuilds, so both files restore the same way.
+func (s *Server) exportEncrypted(password string) ([]byte, error) {
+	snap, err := s.st.ExportAll()
+	if err != nil {
+		return nil, err
+	}
+	// Read each key's private-key file into the snapshot so backups are portable.
+	for i := range snap.Keys {
+		if snap.Keys[i].PrivatePath == "" {
+			continue
+		}
+		if data, rerr := os.ReadFile(snap.Keys[i].PrivatePath); rerr == nil {
+			snap.Keys[i].PrivateKeyData = data
+		}
+	}
+	plain, err := json.Marshal(snap)
+	if err != nil {
+		return nil, err
+	}
+	return backup.Encrypt(password, plain)
+}
+
+// restoreEncrypted opens an encrypted backup and replaces the entire store with
+// its contents, writing the key files back to disk on the way. It returns the
+// HTTP status to report along with any error, since a bad password and a failed
+// write are the caller's problem in very different ways.
+func (s *Server) restoreEncrypted(password string, data []byte) (*store.Snapshot, int, error) {
+	plain, err := backup.Decrypt(password, data)
+	if err != nil {
+		return nil, 400, err // ErrWrongPassword => "wrong password or corrupt backup"
+	}
+	var snap store.Snapshot
+	if err := json.Unmarshal(plain, &snap); err != nil {
+		return nil, 400, errors.New("backup is not valid")
+	}
+
+	// Write key files back to disk and point each record at the new location.
+	dir := s.keysDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, 500, err
+	}
+	for i := range snap.Keys {
+		k := &snap.Keys[i]
+		if k.Name == "" || strings.ContainsAny(k.Name, "/\\") {
+			continue
+		}
+		priv := filepath.Join(dir, k.Name)
+		// Remove any existing files first: a leftover key may be read-only (0400),
+		// which would make WriteFile's truncate fail with "permission denied".
+		_ = os.Remove(priv)
+		_ = os.Remove(priv + ".pub")
+		if len(k.PrivateKeyData) > 0 {
+			if err := os.WriteFile(priv, k.PrivateKeyData, 0o600); err != nil {
+				return nil, 500, fmt.Errorf("write key %s: %w", k.Name, err)
+			}
+		}
+		if k.PublicKey != "" {
+			_ = os.WriteFile(priv+".pub", []byte(strings.TrimSpace(k.PublicKey)+"\n"), 0o644)
+		}
+		k.PrivatePath = priv
+	}
+
+	if err := s.st.ImportAll(&snap); err != nil {
+		return nil, 500, err
+	}
+	// The restore may have changed (or introduced) the master password, so drop
+	// all unlock sessions: the SPA will re-lock and prompt with the restored one.
+	s.clearSessions()
+	s.autoExport()
+	return &snap, 200, nil
+}
+
 // handleBackup verifies the master password and streams an encrypted dump of the
 // entire store (inventory, saved passwords, keys with private files, settings).
 func (s *Server) handleBackup(w http.ResponseWriter, r *http.Request) {
@@ -123,26 +198,7 @@ func (s *Server) handleBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	snap, err := s.st.ExportAll()
-	if err != nil {
-		writeErr(w, 500, err)
-		return
-	}
-	// Read each key's private-key file into the snapshot so backups are portable.
-	for i := range snap.Keys {
-		if snap.Keys[i].PrivatePath == "" {
-			continue
-		}
-		if data, rerr := os.ReadFile(snap.Keys[i].PrivatePath); rerr == nil {
-			snap.Keys[i].PrivateKeyData = data
-		}
-	}
-	plain, err := json.Marshal(snap)
-	if err != nil {
-		writeErr(w, 500, err)
-		return
-	}
-	enc, err := backup.Encrypt(body.Password, plain)
+	enc, err := s.exportEncrypted(body.Password)
 	if err != nil {
 		writeErr(w, 500, err)
 		return
@@ -165,53 +221,11 @@ func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err)
 		return
 	}
-	plain, err := backup.Decrypt(body.Password, []byte(body.Data))
+	snap, code, err := s.restoreEncrypted(body.Password, []byte(body.Data))
 	if err != nil {
-		writeErr(w, 400, err) // ErrWrongPassword => "wrong password or corrupt backup"
+		writeErr(w, code, err)
 		return
 	}
-	var snap store.Snapshot
-	if err := json.Unmarshal(plain, &snap); err != nil {
-		writeErr(w, 400, errors.New("backup is not valid"))
-		return
-	}
-
-	// Write key files back to disk and point each record at the new location.
-	dir := s.keysDir()
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		writeErr(w, 500, err)
-		return
-	}
-	for i := range snap.Keys {
-		k := &snap.Keys[i]
-		if k.Name == "" || strings.ContainsAny(k.Name, "/\\") {
-			continue
-		}
-		priv := filepath.Join(dir, k.Name)
-		// Remove any existing files first: a leftover key may be read-only (0400),
-		// which would make WriteFile's truncate fail with "permission denied".
-		_ = os.Remove(priv)
-		_ = os.Remove(priv + ".pub")
-		if len(k.PrivateKeyData) > 0 {
-			if err := os.WriteFile(priv, k.PrivateKeyData, 0o600); err != nil {
-				writeErr(w, 500, fmt.Errorf("write key %s: %w", k.Name, err))
-				return
-			}
-		}
-		if k.PublicKey != "" {
-			_ = os.WriteFile(priv+".pub", []byte(strings.TrimSpace(k.PublicKey)+"\n"), 0o644)
-		}
-		k.PrivatePath = priv
-	}
-
-	if err := s.st.ImportAll(&snap); err != nil {
-		writeErr(w, 500, err)
-		return
-	}
-	// The restore may have changed (or introduced) the master password, so drop
-	// all unlock sessions: the SPA will re-lock and prompt with the restored one.
-	s.clearSessions()
-	s.autoExport()
 	writeJSON(w, 200, map[string]int{
 		"hosts": len(snap.Hosts), "keys": len(snap.Keys), "groups": len(snap.Groups),
 	})

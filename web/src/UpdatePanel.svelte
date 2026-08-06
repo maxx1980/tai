@@ -1,12 +1,18 @@
 <script lang="ts">
   import { api, runUpdate, updateStatus, type UpdateStatus } from "./api";
-  import { update, refreshUpdate, notify } from "./store.svelte";
+  import { update, refreshUpdate, notify, lock } from "./store.svelte";
 
   // The confirmation step. The user asked for an update, we ask about the
   // backup before touching anything — see the note in the dialog.
   let confirming = $state(false);
   let wantBackup = $state(true);
+  let backupPw = $state("");
   let busy = $state(false);
+
+  // The backup is encrypted, so it needs a password — the master one where it
+  // exists, since a snapshot sealed with anything else could not be opened from
+  // the restore list either.
+  const canStart = $derived(!wantBackup || backupPw.length > 0);
 
   let status = $state<UpdateStatus | null>(null);
   let logBox: HTMLPreElement | undefined = $state();
@@ -55,8 +61,9 @@
     if (!info) return;
     busy = true;
     try {
-      status = await runUpdate(info.latest, wantBackup);
+      status = await runUpdate(info.latest, wantBackup, backupPw);
       confirming = false;
+      backupPw = "";
       notify("info", "Update started");
     } catch (e) {
       notify("error", String(e));
@@ -151,7 +158,10 @@
       </h3>
 
       {#if status.backup}
-        <p class="muted">Database copied to <span class="mono">{status.backup}</span></p>
+        <p class="muted">
+          Encrypted backup saved to <span class="mono">{status.backup}</span> — restore it from
+          Settings → Security &amp; backup.
+        </p>
       {/if}
 
       {#if status.state === "error"}
@@ -189,12 +199,35 @@
       </p>
       <label class="pick">
         <input type="checkbox" bind:checked={wantBackup} />
-        Copy the database to ~/.local/share/webssh/backups first
+        Save an encrypted backup first
       </label>
+      {#if wantBackup}
+        <div class="field">
+          <label for="bupw">{lock.has_password ? "Master password" : "Password for the backup"}</label>
+          <input
+            id="bupw"
+            type="password"
+            bind:value={backupPw}
+            autocomplete="current-password"
+            onkeydown={(e) => e.key === "Enter" && canStart && !busy && start()}
+          />
+          <span class="muted" style="font-size:12px">
+            {#if lock.has_password}
+              The backup is encrypted with your master password — the same file the Backup
+              button in Settings produces.
+            {:else}
+              No master password is set, so choose one for this file. You will need it to
+              restore, and it is not stored anywhere.
+            {/if}
+            It lands in ~/.local/share/webssh/backups; roll back to it from
+            <strong>Settings → Security &amp; backup</strong>.
+          </span>
+        </div>
+      {/if}
       <div class="row">
         <div class="spacer"></div>
         <button onclick={() => (confirming = false)} disabled={busy}>Cancel</button>
-        <button class="primary" onclick={start} disabled={busy}>
+        <button class="primary" onclick={start} disabled={busy || !canStart}>
           {wantBackup ? "Back up and update" : "Update without a backup"}
         </button>
       </div>

@@ -7,9 +7,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
+	"webssh/internal/backup"
+	"webssh/internal/config"
 	"webssh/internal/update"
 )
 
@@ -43,8 +46,9 @@ func (s *Server) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 // this install was never able to build.
 func (s *Server) handleUpdateRun(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Tag    string `json:"tag"`
-		Backup bool   `json:"backup"`
+		Tag      string `json:"tag"`
+		Backup   bool   `json:"backup"`
+		Password string `json:"password"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeErr(w, 400, err)
@@ -71,9 +75,14 @@ func (s *Server) handleUpdateRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var snapshot func() (string, error)
+	var snapshot func(string) (string, error)
 	if body.Backup {
-		snapshot = s.snapshotDB
+		if code, err := s.checkBackupPassword(body.Password); err != nil {
+			writeErr(w, code, err)
+			return
+		}
+		pw := body.Password
+		snapshot = func(tag string) (string, error) { return s.snapshotBackup(pw, tag) }
 	}
 	if err := s.updates.Start(info.Latest, snapshot); err != nil {
 		writeErr(w, 409, err)
@@ -82,26 +91,69 @@ func (s *Server) handleUpdateRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, s.updates.Status())
 }
 
-// snapshotDB writes a timestamped copy of the database into <DataDir>/backups
-// and returns its path. This is the pre-update backup: an update rebuilds the
-// binary and never touches the DB, but a new version may migrate it, and a
+// checkBackupPassword validates the password the update dialog collected, and
+// reports the status to answer with if it does not hold up. With a master
+// password set it has to be that one: a snapshot sealed with anything else is a
+// rollback nobody will be able to open. Without one, any non-empty password
+// does — the file is only readable with it either way.
+func (s *Server) checkBackupPassword(pw string) (int, error) {
+	stored := s.st.GetSetting(config.KeyMasterPassword, "")
+	if stored == "" {
+		if pw == "" {
+			return 400, errors.New("a password is needed to encrypt the backup")
+		}
+		return 200, nil
+	}
+	if !backup.VerifyPassword(stored, pw) {
+		return 401, errors.New("wrong master password")
+	}
+	return 200, nil
+}
+
+// snapshotBackup writes an encrypted backup into <DataDir>/backups and returns
+// its path. This is the pre-update rollback point: an update rebuilds the binary
+// and never touches the data, but a new version may migrate the database, and a
 // migration is the one step that cannot be undone by checking the old tag back
-// out.
-func (s *Server) snapshotDB() (string, error) {
-	dir := filepath.Join(s.paths.DataDir, "backups")
+// out. The file is the same format the Settings panel produces, so it restores
+// through the same code — from the list of backups, or from disk on another
+// machine.
+func (s *Server) snapshotBackup(password, tag string) (string, error) {
+	dir := s.backupsDir()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
-	path := filepath.Join(dir, fmt.Sprintf("webssh-%s.db", time.Now().Format("20060102-150405")))
-	if err := s.st.SnapshotTo(path); err != nil {
+	enc, err := s.exportEncrypted(password)
+	if err != nil {
 		return "", err
 	}
-	// SQLite creates the copy with the process umask. It holds saved host
-	// passwords, so narrow it to the owner even though the directory is 0700.
-	if err := os.Chmod(path, 0o600); err != nil {
+	// The tag being installed goes in the name: which version this was taken
+	// ahead of is the first thing you want to know when rolling back.
+	name := fmt.Sprintf("webssh-%s-before-%s.enc", time.Now().Format("20060102-150405"), safeName(tag))
+	path := filepath.Join(dir, name)
+	// It holds saved host passwords and private keys — encrypted, but the file
+	// mode costs nothing and the directory is 0700 already.
+	if err := os.WriteFile(path, enc, 0o600); err != nil {
 		return "", err
 	}
 	return path, nil
+}
+
+// safeName keeps a git tag usable as part of a file name. Tags are tame in
+// practice, but the name is built from something GitHub controls.
+func safeName(tag string) string {
+	clean := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			return r
+		case r == '.', r == '-', r == '_':
+			return r
+		}
+		return '-'
+	}, tag)
+	if clean == "" {
+		return "update"
+	}
+	return clean
 }
 
 // currentVersion is what the SPA shows as "you are running". Resolved once:

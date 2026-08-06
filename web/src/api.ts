@@ -174,6 +174,50 @@ export const restore = (dataText: string, password: string) =>
     body: { data: dataText, password },
   });
 
+// ---- Backups kept on this machine ----
+
+export interface BackupFile {
+  name: string;
+  size: number;
+  made: string;
+  legacy: boolean; // a plain .db copy from before backups were encrypted
+}
+
+// listBackups shows what is in ~/.local/share/webssh/backups — chiefly the
+// snapshot the updater takes before every rebuild.
+export const listBackups = () => api.get<BackupFile[]>("/api/backups");
+
+// restoreBackup rolls back to one of those files. Same operation as uploading
+// it in Settings, without sending it through the browser and back.
+export const restoreBackup = (name: string, password: string) =>
+  request<{ hosts: number; keys: number; groups: number }>("POST", "/api/backups/restore", {
+    body: { name, password },
+  });
+
+export const deleteBackup = (name: string) =>
+  api.del<{ ok: boolean }>(`/api/backups/${encodeURIComponent(name)}`);
+
+// downloadBackup saves a stored backup to the user's device, so the only copy
+// is not on the same disk as the thing it protects.
+export async function downloadBackup(name: string): Promise<void> {
+  const res = await netFetch(`/api/backups/${encodeURIComponent(name)}`, {
+    headers: { "X-Auth-Token": token() },
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new ApiError(res.status, t ? JSON.parse(t) : {});
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 // resetAll wipes everything after verifying the master password.
 export const resetAll = (password: string) =>
   request<{ ok: boolean }>("POST", "/api/reset", { body: { password } });
@@ -210,8 +254,10 @@ export const checkUpdate = (force = false) =>
 // runUpdate only starts it and the log arrives here.
 export const updateStatus = () => api.get<UpdateStatus>("/api/update/status");
 
-export const runUpdate = (tag: string, backup: boolean) =>
-  api.post<UpdateStatus>("/api/update/run", { tag, backup });
+// runUpdate starts the rebuild. password encrypts the pre-update backup and is
+// only read when backup is true — the master password, where one is set.
+export const runUpdate = (tag: string, backup: boolean, password: string) =>
+  api.post<UpdateStatus>("/api/update/run", { tag, backup, password });
 
 // terminalURL builds the websocket URL (token as query param) for a host.
 // shell selects which client the daemon runs: ssh (default) or telnet.
