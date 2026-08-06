@@ -122,7 +122,7 @@ installs whichever is missing (asking to be re-run after a reboot if Windows
 needs one), then runs `get.sh` inside it. Installing WSL for the first time
 needs administrator rights; webssh itself does not, afterwards.
 
-Download and double-click [`get.bat`](get.bat) to run it without opening
+Download and double-click [`get.bat`](https://raw.githubusercontent.com/maxx1980/tai/main/get.bat) to run it without opening
 PowerShell yourself — it requests elevation through the normal UAC prompt only
 when WSL still needs installing. Or, from PowerShell directly:
 
