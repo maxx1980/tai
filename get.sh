@@ -1,21 +1,10 @@
 #!/usr/bin/env bash
 # Installs a prebuilt webssh from GitHub releases and registers it in the Linux
 # application menu. Everything lands under $HOME — no root, no system paths.
+# Run it with --help for the options; see usage() below for the same text.
 #
-#   curl -fsSL https://raw.githubusercontent.com/maxx1980/tai/main/get.sh | bash
-#
-# Options come after '-s --' when the script is piped into bash:
-#
-#   ... | bash -s -- --ui browser        a normal browser tab, not an app window
-#   ... | bash -s -- --version v0.4.0    install one specific release
-#   ... | bash -s -- --prefix ~/apps     put the binary in ~/apps/bin
-#   ... | bash -s -- --run               start webssh once it is installed
-#   ... | bash -s -- --uninstall         remove binary, icons and launcher
-#
-# Also: --app-browser PATH (which browser hosts the app window), --from DIR
-# (install an already-unpacked archive), --skip-verify (no checksum check).
-# The release archive ships this script, so running it from an unpacked archive
-# installs those files instead of downloading anything.
+# This script is normally piped into bash, which means it has no file behind it:
+# ${BASH_SOURCE[0]} is unset, so nothing here may read the script itself.
 set -euo pipefail
 
 REPO=${WEBSSH_REPO:-maxx1980/tai}
@@ -42,7 +31,26 @@ die() {
 }
 
 usage() {
-	sed -n '2,18p' "${BASH_SOURCE[0]}" | cut -c3-
+	cat <<EOF
+Installs a prebuilt webssh and registers it in the Linux application menu.
+
+  curl -fsSL https://raw.githubusercontent.com/$REPO/main/get.sh | bash
+
+Options come after '-s --', because the script is piped into bash:
+
+  ... | bash -s -- --ui browser|app     how the interface opens (default: app
+                                        when a chromium browser is installed)
+  ... | bash -s -- --app-browser PATH   which browser hosts the app window
+  ... | bash -s -- --version vX.Y.Z     install one specific release
+  ... | bash -s -- --prefix DIR         install into DIR/bin (default ~/.local)
+  ... | bash -s -- --run                start webssh once it is installed
+  ... | bash -s -- --uninstall          remove binary, icons and launcher
+  ... | bash -s -- --skip-verify        install without checking the checksum
+
+Each release archive ships this script, so running it from an unpacked archive
+installs the files next to it instead of downloading anything (--from DIR names
+that directory explicitly).
+EOF
 	exit 0
 }
 
@@ -145,7 +153,10 @@ fi
 # installable offline. When the script is piped from curl its "directory" holds
 # no payload and this correctly finds nothing.
 if [[ -z $from_dir ]]; then
-	here=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd) || here=""
+	# Empty when piped from curl — there is no script file to sit next to.
+	self=${BASH_SOURCE[0]:-}
+	here=""
+	[[ -n $self ]] && here=$(CDPATH= cd -- "$(dirname -- "$self")" 2>/dev/null && pwd)
 	if [[ -n $here && -f $here/$BINARY && -d $here/icons ]]; then
 		from_dir=$here
 	fi
