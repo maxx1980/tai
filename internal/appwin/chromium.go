@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 )
 
 // chromiumNames are tried on PATH, most-preferred first.
@@ -28,10 +29,53 @@ var chromiumPaths = []string{
 	"/opt/vivaldi/vivaldi",
 }
 
+// windowsChromiumPaths mirrors chromiumPaths for Windows: chrome.exe/
+// msedge.exe and friends are never added to PATH by their installers (there
+// is no Linux-style packaging convention for that here), so chromiumNames'
+// PATH lookup alone would never find them - only explicit paths do. Edge in
+// particular ships inbox with every modern Windows install, which is what
+// makes app-window mode available there by default without anything extra.
+func windowsChromiumPaths() []string {
+	dir := func(envVar, rel string) string {
+		if v := os.Getenv(envVar); v != "" {
+			return filepath.Join(v, rel)
+		}
+		return ""
+	}
+	var out []string
+	for _, p := range []string{
+		dir("ProgramFiles", `Google\Chrome\Application\chrome.exe`),
+		dir("ProgramFiles(x86)", `Google\Chrome\Application\chrome.exe`),
+		dir("LocalAppData", `Google\Chrome\Application\chrome.exe`),
+		dir("ProgramFiles", `BraveSoftware\Brave-Browser\Application\brave.exe`),
+		dir("LocalAppData", `BraveSoftware\Brave-Browser\Application\brave.exe`),
+		// Edge installs 32-bit under Program Files (x86) even on 64-bit
+		// Windows - a known quirk, and the entry most likely to actually hit.
+		dir("ProgramFiles(x86)", `Microsoft\Edge\Application\msedge.exe`),
+		dir("ProgramFiles", `Microsoft\Edge\Application\msedge.exe`),
+		dir("ProgramFiles", `Vivaldi\Application\vivaldi.exe`),
+		dir("LocalAppData", `Vivaldi\Application\vivaldi.exe`),
+	} {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // isExecutableFile reports whether p is a runnable file (not a directory).
+// Windows has no POSIX executable bit to check - FileInfo.Mode() never sets
+// any of the 0o111 bits there, so existence is the only signal available
+// (and enough, since every candidate path already ends in .exe).
 func isExecutableFile(p string) bool {
 	st, err := os.Stat(p)
-	return err == nil && !st.IsDir() && st.Mode()&0o111 != 0
+	if err != nil || st.IsDir() {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	return st.Mode()&0o111 != 0
 }
 
 // FindChromiumAll returns every chromium-family browser on this machine, in
@@ -57,7 +101,11 @@ func FindChromiumAll() []string {
 			add(p)
 		}
 	}
-	for _, p := range chromiumPaths {
+	paths := chromiumPaths
+	if runtime.GOOS == "windows" {
+		paths = windowsChromiumPaths()
+	}
+	for _, p := range paths {
 		if isExecutableFile(p) {
 			add(p)
 		}

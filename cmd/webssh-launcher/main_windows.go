@@ -2,21 +2,25 @@
 
 // Command webssh-launcher is what the Desktop/Start Menu shortcut webssh-setup
 // creates actually points at. It starts webssh inside WSL, reads the token
-// URL it prints on its first line of output, and opens that URL in whatever
-// browser Windows already has - webssh itself has no browser to open from
-// inside a bare WSL distro, so this stands in for the app window a native
-// build would otherwise open directly. Built with -H=windowsgui (see the
-// Makefile), so it never shows a console of its own.
+// URL it prints on its first line of output, and opens that URL the same way
+// a native build would - a chromeless chromium --app= window when one is
+// available, otherwise the registered default browser - since webssh itself
+// has no browser to open from inside a bare WSL distro. Built with
+// -H=windowsgui (see the Makefile), so it never shows a console of its own.
 package main
 
 import (
 	"bufio"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"syscall"
 	"unsafe"
 
+	"webssh/internal/appwin"
+	"webssh/internal/config"
 	"webssh/internal/wslutil"
 )
 
@@ -69,11 +73,14 @@ func main() {
 		return
 	}
 
-	// Same mechanism internal/appwin/browser.go already uses for the native
-	// Windows fallback - rundll32 reliably reaches the registered browser;
-	// explorer.exe with a URL argument does not (it can just open a File
-	// Explorer window instead, depending on the Windows build).
-	_ = exec.Command("rundll32.exe", "url.dll,FileProtocolHandler", url).Start()
+	// Reuses the exact "app" mode a native build would use: a chromeless
+	// chromium window with its own profile when a chromium-based browser is
+	// findable (internal/appwin/chromium.go now checks Windows install
+	// paths too), falling back to the registered default browser otherwise -
+	// internal/appwin/browser.go's Windows case (rundll32) covers that.
+	profileDir := filepath.Join(os.Getenv("LOCALAPPDATA"), "webssh", "browser")
+	ui := appwin.New(appwin.ModeApp, config.Paths{BrowserDir: profileDir}, "", "")
+	_ = ui.Open(url)
 
 	// Stay alive (invisibly - there's no console) for as long as webssh runs,
 	// so its stdout/stderr pipes stay open instead of breaking mid-write.
