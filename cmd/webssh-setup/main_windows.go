@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
+	"unicode"
 	"unicode/utf16"
 	"unsafe"
 
@@ -50,21 +51,23 @@ func main() {
 		return
 	}
 
-	distros := wslDistros()
-	if len(distros) == 0 {
-		if !isElevated() {
-			relaunchElevated()
+	// Probe the default distro directly instead of parsing `wsl -l -q`'s text
+	// output to find it: that output needs UTF-16 decoding, which is more
+	// fragile than just trying the name we expect and checking the exit code.
+	distro := defaultDistro
+	if !distroReady(distro) {
+		distros := wslDistros()
+		if len(distros) == 0 {
+			if !isElevated() {
+				relaunchElevated()
+				return
+			}
+			fmt.Printf("WSL is present but has no Linux distro yet. Installing %s...\n", defaultDistro)
+			run("wsl.exe", "--install", "-d", defaultDistro)
+			fmt.Println("Installed. Run this installer again to continue installing webssh.")
+			pause()
 			return
 		}
-		fmt.Printf("WSL is present but has no Linux distro yet. Installing %s...\n", defaultDistro)
-		run("wsl.exe", "--install", "-d", defaultDistro)
-		fmt.Println("Installed. Run this installer again to continue installing webssh.")
-		pause()
-		return
-	}
-
-	distro := defaultDistro
-	if !contains(distros, distro) {
 		distro = distros[0]
 		fmt.Printf("Using existing distro '%s' instead of the default.\n", distro)
 	}
@@ -102,7 +105,15 @@ func wslReady() bool {
 	return cmd.Run() == nil
 }
 
-// wslDistros lists the registered WSL distros, e.g. ["Ubuntu"].
+// distroReady checks whether a specific distro exists and can run a command
+// as root, without needing to parse any of wsl.exe's text output.
+func distroReady(name string) bool {
+	cmd := exec.Command("wsl.exe", "-d", name, "-u", "root", "--", "true")
+	return cmd.Run() == nil
+}
+
+// wslDistros lists the registered WSL distros, e.g. ["Ubuntu"]. Only used as
+// a fallback when the default distro name doesn't just work.
 func wslDistros() []string {
 	out, err := exec.Command("wsl.exe", "-l", "-q").Output()
 	if err != nil {
@@ -110,7 +121,9 @@ func wslDistros() []string {
 	}
 	var distros []string
 	for _, line := range strings.Split(decodeWslText(out), "\n") {
-		line = strings.TrimSpace(line)
+		line = strings.TrimFunc(line, func(r rune) bool {
+			return !unicode.IsPrint(r)
+		})
 		if line != "" {
 			distros = append(distros, line)
 		}
@@ -119,27 +132,18 @@ func wslDistros() []string {
 }
 
 // decodeWslText decodes wsl.exe's console output. Real console apps on
-// Windows switch to UTF-16LE (with a BOM) when stdout is a pipe rather than
-// an actual console, which is exactly the case when os/exec captures it.
+// Windows switch to UTF-16LE (sometimes but not always with a leading BOM)
+// when stdout is a pipe rather than an actual console, which is exactly the
+// case when os/exec captures it.
 func decodeWslText(b []byte) string {
-	if len(b) < 2 || b[0] != 0xFF || b[1] != 0xFE {
-		return string(b)
+	if len(b) >= 2 && b[0] == 0xFF && b[1] == 0xFE {
+		b = b[2:]
 	}
-	b = b[2:]
 	u16 := make([]uint16, 0, len(b)/2)
 	for i := 0; i+1 < len(b); i += 2 {
 		u16 = append(u16, uint16(b[i])|uint16(b[i+1])<<8)
 	}
 	return string(utf16.Decode(u16))
-}
-
-func contains(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }
 
 // run runs a command with its output going straight to this console and
