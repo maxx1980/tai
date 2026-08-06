@@ -1,6 +1,7 @@
 # Go binary
 /webssh
 /webssh.exe
+/webssh-setup.exe
 
 # Release archives (rebuild with `make dist-all`)
 /dist/
@@ -8,6 +9,7 @@
 # Generated icon artefacts (rebuild with `make icons` / `make syso`)
 assets/png/
 cmd/webssh/*.syso
+cmd/webssh-setup/*.syso
 
 # Frontend
 web/node_modules/

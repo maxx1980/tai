@@ -1,4 +1,4 @@
-.PHONY: all ui build build-webview run clean deps dev icons syso build-windows install-desktop uninstall-desktop dist dist-all
+.PHONY: all ui build build-webview run clean deps dev icons syso build-windows setup-syso build-windows-setup install-desktop uninstall-desktop dist dist-all
 
 BINARY := webssh
 # VERSION is stamped into the binary so the updater can compare it with the
@@ -46,6 +46,16 @@ syso: icons
 
 build-windows: ui syso
 	GOOS=windows GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(BINARY).exe ./cmd/webssh
+
+# setup-syso/build-windows-setup build webssh-setup.exe: a double-click
+# installer that gets WSL and a distro ready and runs get.sh inside them, for
+# people who don't want to open PowerShell or fight its ExecutionPolicy. Pure
+# Go (no cgo), same as build-windows.
+setup-syso: icons
+	$(WINRES) make --arch amd64 --in winres/winres-setup.json --out cmd/webssh-setup/rsrc
+
+build-windows-setup: setup-syso
+	GOOS=windows GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o webssh-setup.exe ./cmd/webssh-setup
 
 # dist packs a release archive: the binary plus the icons and .desktop template
 # get.sh needs to register the app, and get.sh itself so the archive installs
@@ -107,5 +117,5 @@ uninstall-desktop:
 	-update-desktop-database $(DESKTOP_DIR)
 
 clean:
-	rm -f $(BINARY) $(BINARY).exe cmd/webssh/*.syso
+	rm -f $(BINARY) $(BINARY).exe webssh-setup.exe cmd/webssh/*.syso cmd/webssh-setup/*.syso
 	rm -rf web/dist web/node_modules assets/png $(DIST_DIR)
