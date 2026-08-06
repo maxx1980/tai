@@ -88,18 +88,19 @@ func Defaults(home string) map[string]string {
 		// gives it a fresh window with no wrapper needed — cmd.exe's own `start`
 		// is only there to give the fallback the same "own window" behavior.
 		//
-		// -EncodedCommand rather than -Command: WSL interop rebuilds a Win32
-		// command line from the argv it hands the target .exe, and does not
-		// reliably re-quote an argument that itself contains spaces — a plain
-		// -Command "wsl.exe -d Ubuntu ... ssh {{alias}}" arrives at PowerShell
-		// with the quoted argument dropped entirely ("Command must follow the
-		// -Command parameter"), confirmed live. Base64 of UTF-16LE has no
-		// whitespace or shell metacharacters, so nothing downstream can mangle
-		// it. cmd.exe's fallback keeps plain args since `start` never showed
-		// this problem.
+		// Deliberately unquoted after -Command/start: WSL interop rebuilds a
+		// Win32 command line from the argv it hands the target .exe, and does
+		// not reliably preserve a single argument that itself contains spaces
+		// — both a quoted -Command "wsl.exe -d Ubuntu ... ssh {{alias}}" and a
+		// base64 -EncodedCommand of it arrived at PowerShell mangled, confirmed
+		// live on real WSL. Every token below is one argv element with no
+		// internal spaces, so nothing needs quoting in the first place; -Command
+		// in "string" mode already glues all its trailing args back together
+		// (same as ping/notepad.exe examples in `powershell -?`), and cmd.exe's
+		// `start` does the same for the fallback.
 		wslSSH := "wsl.exe -d " + distro + " -u root -- ssh {{alias}}"
-		terminalCmd = "bash -c 'enc=$(printf %s \"" + wslSSH + "\" | iconv -t UTF-16LE | base64 -w0); " +
-			"command -v powershell.exe >/dev/null 2>&1 && exec powershell.exe -NoExit -EncodedCommand \"$enc\" || " +
+		terminalCmd = "bash -c 'command -v powershell.exe >/dev/null 2>&1 && " +
+			"exec powershell.exe -NoExit -Command " + wslSSH + " || " +
 			"exec cmd.exe /c start " + wslSSH + "'"
 		filesCmd = `bash -c 'explorer.exe "$(wslpath -w {{mountpoint}})"'`
 	}
