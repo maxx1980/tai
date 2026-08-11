@@ -184,6 +184,16 @@ func TestNewAppModeHonoursPinnedBrowser(t *testing.T) {
 	}
 }
 
+func TestBrowserFallbackHonoursAppBrowser(t *testing.T) {
+	ui := &chromiumUI{exe: "/usr/bin/microsoft-edge"}
+	if got := fallbackBrowserCommand(ui, ""); got != "/usr/bin/microsoft-edge" {
+		t.Fatalf("fallback browser = %q, want pinned Edge", got)
+	}
+	if got := fallbackBrowserCommand(ui, "firefox {{url}}"); got != "firefox {{url}}" {
+		t.Fatalf("fallback browser = %q, want explicit browser_cmd", got)
+	}
+}
+
 // FindChromiumAll backs the installer's menu, so duplicates (a PATH symlink to
 // the same binary under /opt) would show up as bogus extra choices.
 func TestFindChromiumAllDeduplicates(t *testing.T) {

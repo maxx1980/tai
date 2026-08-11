@@ -142,6 +142,7 @@ type chromiumUI struct {
 
 func (c *chromiumUI) Blocking() bool { return false }
 func (c *chromiumUI) Close()         {}
+func (c *chromiumUI) Mode() Mode     { return ModeApp }
 
 func (c *chromiumUI) Open(rawURL string) error {
 	args := []string{

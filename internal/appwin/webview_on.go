@@ -21,6 +21,7 @@ func newWebview() (UI, error) {
 }
 
 func (v *webviewUI) Blocking() bool { return true }
+func (v *webviewUI) Mode() Mode     { return ModeWebview }
 
 // Open creates the window and runs the GTK loop. It must be called from the
 // main goroutine with the OS thread locked; Run only returns once the user

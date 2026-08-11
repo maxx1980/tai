@@ -18,8 +18,26 @@ type browserUI struct {
 
 func (b *browserUI) Blocking() bool { return false }
 func (b *browserUI) Close()         {}
+func (b *browserUI) Mode() Mode     { return ModeBrowser }
 
 func (b *browserUI) Open(rawURL string) error { return OpenURL(b.cmd, rawURL) }
+
+// OpenBrowserFallback opens rawURL as a regular tab while preserving the
+// browser selected for an app window. Falling back through xdg-open here would
+// silently switch, for example, a pinned Edge app to the system-default Chrome.
+func OpenBrowserFallback(ui UI, browserCmd, rawURL string) error {
+	return OpenURL(fallbackBrowserCommand(ui, browserCmd), rawURL)
+}
+
+func fallbackBrowserCommand(ui UI, browserCmd string) string {
+	if browserCmd != "" {
+		return browserCmd
+	}
+	if chromium, ok := ui.(*chromiumUI); ok {
+		return chromium.exe
+	}
+	return ""
+}
 
 // OpenURL hands rawURL to the user's browser command, falling back to the
 // platform's default handler when none is configured (or it is unparseable).

@@ -26,6 +26,11 @@ const (
 // Quit is closed when the daemon should shut down because the last tab is gone.
 func (s *Server) Quit() <-chan struct{} { return s.quit }
 
+// HasClients reports whether at least one browser tab has established its
+// presence websocket. The launcher uses this after spawning a Chromium app
+// window: no connection means it should fall back to a normal browser tab.
+func (s *Server) HasClients() bool { return s.clients.Load() > 0 }
+
 // exitOnClose reports the current setting; it is read at grace-timer fire time
 // so toggling it in the UI takes effect without a restart.
 func (s *Server) exitOnClose() bool {

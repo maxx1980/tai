@@ -139,21 +139,45 @@ func run(addr string, noOpen bool, uiFlag string) error {
 	if err != nil {
 		return err
 	}
+	browserCmd := st.GetSetting(config.KeyBrowserCmd, "")
+	appBrowser := st.GetSetting(config.KeyAppBrowser, "")
+	mode := appwin.ParseMode(st.GetSetting(config.KeyUIMode, config.Defaults(paths.Home)[config.KeyUIMode]))
+	if uiFlag != "" {
+		mode = appwin.ParseMode(uiFlag)
+	}
 
-	// Background reachability checks feed the inventory status dots.
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		// A launcher click while webssh is already running should reopen the
+		// interface, not die invisibly with EADDRINUSE (desktop entries have no
+		// terminal on which to show that error). Verify the service with the
+		// stable token before treating the occupied port as our own instance.
+		if !noOpen {
+			opened, openErr := reopenExisting(addr, token, func(rawURL string) error {
+				return appwin.New(mode, paths, browserCmd, appBrowser).Open(rawURL)
+			})
+			if opened {
+				if openErr != nil {
+					return fmt.Errorf("reopen running webssh: %w", openErr)
+				}
+				fmt.Println("webssh is already running — opened its interface")
+				return nil
+			}
+		}
+		return err
+	}
+	url := fmt.Sprintf("http://%s/?token=%s", ln.Addr().String(), token)
+	fmt.Printf("webssh listening — open:\n\n    %s\n\n", url)
+
+	// Background reachability checks feed the inventory status dots. Start them
+	// only after this process owns the listener; a second launcher invocation
+	// above exists solely to reopen the already-running instance.
 	hcCtx, hcCancel := context.WithCancel(context.Background())
 	defer hcCancel()
 	hc := health.New(st)
 	go hc.Run(hcCtx)
 
 	srv := server.New(st, paths, token, webassets.FS(), hc)
-
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return err
-	}
-	url := fmt.Sprintf("http://%s/?token=%s", ln.Addr().String(), token)
-	fmt.Printf("webssh listening — open:\n\n    %s\n\n", url)
 
 	httpSrv := &http.Server{Handler: srv.Handler()}
 
@@ -177,13 +201,7 @@ func run(addr string, noOpen bool, uiFlag string) error {
 	if noOpen {
 		waitForStop()
 	} else {
-		mode := appwin.ParseMode(st.GetSetting(config.KeyUIMode, config.Defaults(paths.Home)[config.KeyUIMode]))
-		if uiFlag != "" {
-			mode = appwin.ParseMode(uiFlag)
-		}
-		win := appwin.New(mode, paths,
-			st.GetSetting(config.KeyBrowserCmd, ""),
-			st.GetSetting(config.KeyAppBrowser, ""))
+		win := appwin.New(mode, paths, browserCmd, appBrowser)
 
 		if win.Blocking() {
 			// A webview owns this goroutine until its window closes, so the
@@ -194,7 +212,9 @@ func run(addr string, noOpen bool, uiFlag string) error {
 				waitForStop()
 			}
 		} else {
-			if err := win.Open(url); err != nil {
+			if err := openNonBlockingUI(win, url, srv.HasClients, 5*time.Second, func(rawURL string) error {
+				return appwin.OpenBrowserFallback(win, browserCmd, rawURL)
+			}); err != nil {
 				log.Printf("could not open the interface (%v); open the URL above manually", err)
 			}
 			waitForStop()
@@ -205,6 +225,76 @@ func run(addr string, noOpen bool, uiFlag string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return httpSrv.Shutdown(ctx)
+}
+
+// reopenExisting verifies that addr belongs to a webssh instance using the
+// same stable token, then asks the caller-supplied browser opener to show it.
+// The bool distinguishes "not webssh" from "webssh found but opening failed".
+func reopenExisting(addr, token string, open func(string) error) (bool, error) {
+	return reopenExistingWithClient(addr, token, open, &http.Client{Timeout: time.Second})
+}
+
+func reopenExistingWithClient(addr, token string, open func(string) error, client *http.Client) (bool, error) {
+	rawURL := fmt.Sprintf("http://%s/?token=%s", addr, token)
+	req, err := http.NewRequest(http.MethodGet, "http://"+addr+"/api/lockstate", nil)
+	if err != nil {
+		return false, nil
+	}
+	req.Header.Set("X-Auth-Token", token)
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, nil
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false, nil
+	}
+	return true, open(rawURL)
+}
+
+// openNonBlockingUI starts a browser-backed interface. A Chromium app window
+// can start successfully yet fail before it renders anything; if it has not
+// established the SPA's presence websocket by the deadline, retry through the
+// system browser so the user is never left with only a terminal URL.
+func openNonBlockingUI(
+	win appwin.UI,
+	rawURL string,
+	hasClient func() bool,
+	timeout time.Duration,
+	openBrowser func(string) error,
+) error {
+	if err := win.Open(rawURL); err != nil {
+		if win.Mode() == appwin.ModeApp {
+			log.Printf("could not open the app window (%v); falling back to the browser", err)
+			return openBrowser(rawURL)
+		}
+		return err
+	}
+	if win.Mode() != appwin.ModeApp || waitForClient(hasClient, timeout) {
+		return nil
+	}
+	log.Printf("app window did not connect within %s; falling back to the browser", timeout)
+	return openBrowser(rawURL)
+}
+
+func waitForClient(hasClient func() bool, timeout time.Duration) bool {
+	if hasClient() {
+		return true
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if hasClient() {
+				return true
+			}
+		case <-timer.C:
+			return hasClient()
+		}
+	}
 }
 
 // ensureLoopback refuses to bind to a non-loopback interface — this daemon runs

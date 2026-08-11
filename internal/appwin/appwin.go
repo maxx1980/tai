@@ -59,6 +59,10 @@ type UI interface {
 	Blocking() bool
 	// Close asks a blocking UI to tear down. No-op for the others.
 	Close()
+	// Mode reports the implementation actually selected after fallbacks. The
+	// launcher uses it to detect an app window that never connected and retry in
+	// the system browser.
+	Mode() Mode
 }
 
 // New picks an implementation for mode, degrading rather than failing:
