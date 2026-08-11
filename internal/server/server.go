@@ -26,6 +26,7 @@ import (
 
 	"webssh/internal/config"
 	"webssh/internal/health"
+	"webssh/internal/hostkeys"
 	"webssh/internal/sftpbrowse"
 	"webssh/internal/store"
 	"webssh/internal/update"
@@ -33,13 +34,14 @@ import (
 
 // Server holds shared dependencies for the HTTP handlers.
 type Server struct {
-	st     *store.Store
-	paths  config.Paths
-	token  string
-	assets fs.FS
-	sftp   *sftpbrowse.Manager
-	health *health.Checker
-	mux    *http.ServeMux
+	st       *store.Store
+	paths    config.Paths
+	token    string
+	assets   fs.FS
+	sftp     *sftpbrowse.Manager
+	hostKeys *hostkeys.Verifier
+	health   *health.Checker
+	mux      *http.ServeMux
 
 	// updates compares this build with the newest tag on GitHub and, on
 	// request, rebuilds the working copy in place.
@@ -70,12 +72,14 @@ const sessionCookie = "webssh_session"
 
 // New builds a Server. assets is the embedded SPA filesystem (rooted at dist).
 func New(st *store.Store, paths config.Paths, token string, assets fs.FS, hc *health.Checker) *Server {
+	hostKeys := hostkeys.New(filepath.Join(paths.SSHDir, "known_hosts"))
 	s := &Server{
 		st:       st,
 		paths:    paths,
 		token:    token,
 		assets:   assets,
-		sftp:     sftpbrowse.NewManager(paths.Home, filepath.Join(paths.DataDir, "keys")),
+		sftp:     sftpbrowse.NewManager(paths.Home, hostKeys.Callback, filepath.Join(paths.DataDir, "keys")),
+		hostKeys: hostKeys,
 		health:   hc,
 		updates:  update.New(),
 		mux:      http.NewServeMux(),

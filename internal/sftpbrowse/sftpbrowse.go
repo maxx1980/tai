@@ -48,16 +48,22 @@ type session struct {
 
 // Manager owns the pool of live SFTP sessions.
 type Manager struct {
-	mu       sync.Mutex
-	sessions map[int64]*session
-	home     string   // local user home (for default key discovery)
-	keyDirs  []string // extra dirs holding webssh-managed private keys
+	mu              sync.Mutex
+	sessions        map[int64]*session
+	home            string              // local user home (for default key discovery)
+	hostKeyCallback ssh.HostKeyCallback // mandatory known_hosts/TOFU verifier
+	keyDirs         []string            // extra dirs holding webssh-managed private keys
 }
 
 // NewManager builds a Manager. keyDirs are scanned for private keys (e.g. the
 // app's generated-keys directory) in addition to the agent and ~/.ssh defaults.
-func NewManager(home string, keyDirs ...string) *Manager {
-	m := &Manager{sessions: map[int64]*session{}, home: home, keyDirs: keyDirs}
+func NewManager(home string, hostKeyCallback ssh.HostKeyCallback, keyDirs ...string) *Manager {
+	m := &Manager{
+		sessions:        map[int64]*session{},
+		home:            home,
+		hostKeyCallback: hostKeyCallback,
+		keyDirs:         keyDirs,
+	}
 	go m.reaper()
 	return m
 }
@@ -109,6 +115,9 @@ func (m *Manager) dial(h store.Host, password string) (*session, error) {
 	if h.User == "" {
 		return nil, fmt.Errorf("host %q has no user set", h.Alias)
 	}
+	if m.hostKeyCallback == nil {
+		return nil, errors.New("SSH host-key verifier is not configured")
+	}
 	var auths []ssh.AuthMethod
 	usedPassword := password != ""
 	if usedPassword {
@@ -123,7 +132,7 @@ func (m *Manager) dial(h store.Host, password string) (*session, error) {
 	cfg := &ssh.ClientConfig{
 		User:            h.User,
 		Auth:            auths,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // local, user-initiated tool
+		HostKeyCallback: m.hostKeyCallback,
 		Timeout:         15 * time.Second,
 	}
 	host := h.Hostname

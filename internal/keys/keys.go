@@ -256,9 +256,10 @@ func ExportToSSH(sshDir string, k store.Key) (string, error) {
 
 // DeployTarget is the connection info needed to install a key on a host.
 type DeployTarget struct {
-	Hostname string
-	User     string
-	Port     int
+	Hostname        string
+	User            string
+	Port            int
+	HostKeyCallback ssh.HostKeyCallback
 }
 
 // Deploy connects to the target with password auth and appends publicKey to the
@@ -270,10 +271,13 @@ func Deploy(t DeployTarget, password, publicKey string) error {
 	if t.User == "" {
 		return fmt.Errorf("user required to deploy key")
 	}
+	if t.HostKeyCallback == nil {
+		return fmt.Errorf("SSH host-key verifier is not configured")
+	}
 	cfg := &ssh.ClientConfig{
 		User:            t.User,
 		Auth:            []ssh.AuthMethod{ssh.Password(password)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // local tool, user-initiated one-shot deploy
+		HostKeyCallback: t.HostKeyCallback,
 		Timeout:         15 * time.Second,
 	}
 	addr := net.JoinHostPort(t.Hostname, fmt.Sprintf("%d", t.Port))

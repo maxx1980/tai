@@ -101,3 +101,10 @@ func TestRemoveFilesEmptyPath(t *testing.T) {
 		t.Error("empty PrivatePath accepted, want error")
 	}
 }
+
+func TestDeployRequiresHostKeyVerifier(t *testing.T) {
+	err := Deploy(DeployTarget{Hostname: "127.0.0.1", User: "root", Port: 22}, "password", "key")
+	if err == nil || err.Error() != "SSH host-key verifier is not configured" {
+		t.Fatalf("Deploy error = %v, want missing verifier", err)
+	}
+}

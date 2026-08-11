@@ -625,7 +625,12 @@ func (s *Server) handleDeployKey(w http.ResponseWriter, r *http.Request) {
 			results = append(results, map[string]any{"host_id": hid, "alias": h.Alias, "ok": false, "error": "no saved password for host"})
 			continue
 		}
-		derr := keys.Deploy(keys.DeployTarget{Hostname: hostAddr(h), User: h.User, Port: h.Port}, pw, k.PublicKey)
+		derr := keys.Deploy(keys.DeployTarget{
+			Hostname:        hostAddr(h),
+			User:            h.User,
+			Port:            h.Port,
+			HostKeyCallback: s.hostKeys.Callback,
+		}, pw, k.PublicKey)
 		if derr != nil {
 			results = append(results, map[string]any{"host_id": hid, "alias": h.Alias, "ok": false, "error": derr.Error()})
 			continue
