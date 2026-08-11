@@ -1,10 +1,13 @@
 package update
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // touchExec creates an executable file, the way a real tool would look on disk.
@@ -116,5 +119,62 @@ func TestBuildPATHKeepsInheritedEntries(t *testing.T) {
 		if !strings.Contains(buildPATH(), dir) {
 			t.Errorf("buildPATH dropped %s: %s", dir, buildPATH())
 		}
+	}
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
+	}
+}
+
+// The updater eventually uses `git checkout --force`, which can delete an
+// untracked path that collides with the target tag. The cleanliness check must
+// therefore see untracked files, while still allowing deliberately ignored
+// build artefacts.
+func TestWorkingCopyChangesIncludesUntrackedFiles(t *testing.T) {
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("tracked\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("ignored.log\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "add", "tracked.txt", ".gitignore")
+	runGit(t, dir, "-c", "user.name=webssh test", "-c", "user.email=test@example.invalid",
+		"commit", "--quiet", "-m", "initial")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	changes, err := workingCopyChanges(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changes != "" {
+		t.Fatalf("fresh repository reported changes: %q", changes)
+	}
+
+	if err := os.MkdirAll(filepath.Join(dir, "scratch"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "scratch", "note.txt"), []byte("keep me\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ignored.log"), []byte("build output\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	changes, err = workingCopyChanges(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(changes, "?? scratch/note.txt") {
+		t.Fatalf("untracked file missing from status: %q", changes)
+	}
+	if strings.Contains(changes, "ignored.log") {
+		t.Fatalf("ignored build artefact unexpectedly blocks updates: %q", changes)
 	}
 }

@@ -172,15 +172,22 @@ func canUpdate(dir string) (bool, string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
 	defer cancel()
-	dirty, err := git(ctx, dir, "status", "--porcelain", "--untracked-files=no")
+	dirty, err := workingCopyChanges(ctx, dir)
 	if err != nil {
 		return false, err.Error()
 	}
 	if dirty != "" {
 		return false, "the working copy in " + dir +
-			" has uncommitted changes — commit or discard them first"
+			" has tracked or untracked changes — commit, move or remove them first"
 	}
 	return true, ""
+}
+
+// workingCopyChanges reports every path an update could overwrite. In
+// particular, untracked files must be included: `git checkout --force` removes
+// an untracked file or directory when the target tag needs the same path.
+func workingCopyChanges(ctx context.Context, dir string) (string, error) {
+	return git(ctx, dir, "status", "--porcelain", "--untracked-files=all")
 }
 
 func missingTools() []string {
@@ -510,12 +517,12 @@ func (u *Updater) steps(dir, tag string, snapshot func(string) (string, error)) 
 	// the panel was drawn, and checking out over local edits would either fail
 	// halfway or carry them into the new version.
 	u.step("verify", "checking the working copy is clean")
-	dirty, err := git(gitCtx, dir, "status", "--porcelain", "--untracked-files=no")
+	dirty, err := workingCopyChanges(gitCtx, dir)
 	if err != nil {
 		return err
 	}
 	if dirty != "" {
-		return fmt.Errorf("%s has uncommitted changes — commit or discard them first", dir)
+		return fmt.Errorf("%s has tracked or untracked changes — commit, move or remove them first", dir)
 	}
 
 	u.step("fetch", "fetching "+tag+" from GitHub")
