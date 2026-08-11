@@ -58,15 +58,15 @@ func Mount(baseDir string, h store.Host, password string) (string, error) {
 	// ":" (empty path) mounts the remote login home directory.
 	// accept-new avoids a blocking host-key prompt on the daemon console.
 	// allow_other is needed under WSL: \\wsl$\ (and any drive mapped onto it)
-	// reaches the distro as a different uid than the one that ran sshfs, and
-	// the kernel's FUSE layer denies access to anyone but the mounting user
-	// unless allow_other is set — without it the mount looks empty (and
-	// writes silently go nowhere) from Windows while `ls` inside WSL is fine.
-	// Harmless on native Linux, where the mounting user is the only viewer anyway.
+	// reaches the distro as a different uid than the one that ran sshfs. FUSE
+	// refuses that option for non-root users unless /etc/fuse.conf explicitly
+	// enables user_allow_other, so only request it when the host permits it.
 	args := []string{remote + ":", point,
 		"-o", "reconnect,ServerAliveInterval=15,ServerAliveCountMax=3",
-		"-o", "StrictHostKeyChecking=accept-new",
-		"-o", "allow_other"}
+		"-o", "StrictHostKeyChecking=accept-new"}
+	if fuseAllowsOther("/etc/fuse.conf") {
+		args = append(args, "-o", "allow_other")
+	}
 	if h.Port != 0 && h.Port != 22 {
 		args = append(args, "-p", fmt.Sprintf("%d", h.Port))
 	}
@@ -90,6 +90,28 @@ func Mount(baseDir string, h store.Host, password string) (string, error) {
 		return "", fmt.Errorf("sshfs: %v: %s", err, msg)
 	}
 	return point, nil
+}
+
+// fuseAllowsOther reports whether fuse.conf contains an active
+// user_allow_other directive. Comments and surrounding whitespace are ignored.
+func fuseAllowsOther(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if before, _, found := strings.Cut(line, "#"); found {
+			line = before
+		}
+		if strings.TrimSpace(line) == "user_allow_other" {
+			return true
+		}
+	}
+	return false
 }
 
 func looksLikeAuthFailure(msg string) bool {
