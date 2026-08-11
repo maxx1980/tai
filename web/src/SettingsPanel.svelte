@@ -13,12 +13,13 @@
     ApiError,
     type BackupFile,
   } from "./api";
+  import Modal from "./Modal.svelte";
   import { app, lock, refresh, checkLock, notify, update, refreshUpdate } from "./store.svelte";
 
   let form = $state({ ...app.settings });
   let busy = $state(false);
   let importPath = $state("");
-  let fileInput: HTMLInputElement;
+  let fileInput = $state<HTMLInputElement>();
 
   // ---- Security & backup ----
   type SecModal =
@@ -37,7 +38,7 @@
   let restoreData = $state("");
   let restoreName = $state("");
   let resetConfirm = $state(false);
-  let restoreInput: HTMLInputElement;
+  let restoreInput = $state<HTMLInputElement>();
 
   // Backups sitting in ~/.local/share/webssh/backups — mostly the snapshots the
   // updater leaves behind, listed here because that is where a rollback starts.
@@ -300,7 +301,7 @@
       notify("error", String(e));
     } finally {
       busy = false;
-      fileInput.value = "";
+      if (fileInput) fileInput.value = "";
     }
   }
 
@@ -455,9 +456,9 @@
     </div>
 
     <div class="field">
-      <label>Or upload a config file from your device</label>
-      <button onclick={() => fileInput.click()} disabled={busy}>Upload &amp; import…</button>
-      <input type="file" bind:this={fileInput} onchange={onImportFile} style="display:none" />
+      <label for="config-upload">Or upload a config file from your device</label>
+      <button onclick={() => fileInput?.click()} disabled={busy}>Upload &amp; import…</button>
+      <input id="config-upload" type="file" bind:this={fileInput} onchange={onImportFile} style="display:none" />
     </div>
   </section>
 
@@ -564,10 +565,8 @@
 </div>
 
 {#if modal === "password"}
-  <div class="overlay" onclick={() => (modal = null)}>
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
-      <h2>{lock.has_password ? "Change master password" : "Set master password"}</h2>
+  <Modal titleId="password-title" onclose={() => (modal = null)}>
+      <h2 id="password-title">{lock.has_password ? "Change master password" : "Set master password"}</h2>
       {#if lock.has_password}
         <div class="field">
           <label for="curpw">Current password</label>
@@ -592,15 +591,12 @@
         <button onclick={() => (modal = null)}>Cancel</button>
         <button class="primary" onclick={() => savePassword(false)} disabled={busy}>Save</button>
       </div>
-    </div>
-  </div>
+  </Modal>
 {/if}
 
 {#if modal === "backup"}
-  <div class="overlay" onclick={() => (modal = null)}>
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
-      <h2>Back up now</h2>
+  <Modal titleId="backup-title" onclose={() => (modal = null)}>
+      <h2 id="backup-title">Back up now</h2>
       <p class="muted" style="margin-top:0">
         Enter your master password to save an encrypted backup into
         <span class="mono">~/.local/share/webssh/backups</span>, where updates leave theirs. It
@@ -621,25 +617,22 @@
         <button onclick={() => (modal = null)}>Cancel</button>
         <button class="primary" onclick={doBackup} disabled={busy || !opPw}>Save backup</button>
       </div>
-    </div>
-  </div>
+  </Modal>
 {/if}
 
 {#if modal === "restore"}
-  <div class="overlay" onclick={() => (modal = null)}>
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
-      <h2>Restore</h2>
+  <Modal titleId="restore-title" onclose={() => (modal = null)}>
+      <h2 id="restore-title">Restore</h2>
       <div class="warn">
         ⚠ Restoring <strong>replaces</strong> all current hosts, keys and settings with the
         backup's contents.
       </div>
       <div class="field">
-        <label>Backup file</label>
-        <button onclick={() => restoreInput.click()} disabled={busy}>
+        <label for="restore-file">Backup file</label>
+        <button onclick={() => restoreInput?.click()} disabled={busy}>
           {restoreName || "Choose file…"}
         </button>
-        <input type="file" bind:this={restoreInput} onchange={pickRestoreFile} style="display:none" />
+        <input id="restore-file" type="file" bind:this={restoreInput} onchange={pickRestoreFile} style="display:none" />
       </div>
       <div class="field">
         <label for="rpw">Backup password</label>
@@ -652,15 +645,12 @@
           Restore
         </button>
       </div>
-    </div>
-  </div>
+  </Modal>
 {/if}
 
 {#if modal === "rollback"}
-  <div class="overlay" onclick={() => (modal = null)}>
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
-      <h2>Roll back to this backup</h2>
+  <Modal titleId="rollback-title" onclose={() => (modal = null)}>
+      <h2 id="rollback-title">Roll back to this backup</h2>
       <div class="warn">
         ⚠ Restoring <strong>replaces</strong> all current hosts, keys and settings with what
         <span class="mono">{rollbackTarget?.name}</span> holds, including the master password it
@@ -680,15 +670,12 @@
         <button onclick={() => (modal = null)}>Cancel</button>
         <button class="danger" onclick={doRollback} disabled={busy || !opPw}>Restore</button>
       </div>
-    </div>
-  </div>
+  </Modal>
 {/if}
 
 {#if modal === "disableauth"}
-  <div class="overlay" onclick={() => (modal = null)}>
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
-      <h2>Disable API token?</h2>
+  <Modal titleId="disable-auth-title" onclose={() => (modal = null)}>
+      <h2 id="disable-auth-title">Disable API token?</h2>
       <div class="warn">
         ⚠ Insecure. Without the token, <strong>any local process or user</strong>
         on this machine can read your whole inventory and open SSH sessions using
@@ -703,15 +690,12 @@
           Disable anyway
         </button>
       </div>
-    </div>
-  </div>
+  </Modal>
 {/if}
 
 {#if modal === "reset"}
-  <div class="overlay" onclick={() => (modal = null)}>
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
-      <h2>Reset everything</h2>
+  <Modal titleId="reset-title" onclose={() => (modal = null)}>
+      <h2 id="reset-title">Reset everything</h2>
       <div class="warn">
         ⚠ This permanently deletes all hosts, groups, tags, keys (including files on disk),
         saved passwords and settings. This cannot be undone.
@@ -731,8 +715,7 @@
           Reset everything
         </button>
       </div>
-    </div>
-  </div>
+  </Modal>
 {/if}
 
 <style>

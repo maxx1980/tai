@@ -1,54 +1,86 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { api } from "./api";
+  import Modal from "./Modal.svelte";
   import { app, refresh, notify } from "./store.svelte";
   import type { Host, Group, Key } from "./types";
 
   let { host, groups, onclose }: { host: Host; groups: Group[]; onclose: () => void } =
     $props();
 
-  // Local editable copy.
-  let form = $state<Host>({ ...host, extra_options: { ...(host.extra_options ?? {}) } });
-  let tagsText = $state(host.tags.join(", "));
+  const blankHost = (): Host => ({
+    id: 0,
+    alias: "",
+    hostname: "",
+    user: "",
+    port: 0,
+    telnet_port: 0,
+    pve_port: 0,
+    pbs_port: 0,
+    http_port: 0,
+    https_port: 0,
+    identity_file: "",
+    proxy_jump: "",
+    extra_options: {},
+    group_id: null,
+    notes: "",
+    tags: [],
+  });
+
+  // Local editable state is refreshed when the parent selects another host.
+  // Keeping the reset in an effect avoids accidentally capturing only the
+  // first prop value while still preserving an isolated, mutable form copy.
+  let form = $state<Host>(blankHost());
+  let tagsText = $state("");
   let passwordInput = $state("");
   let clearPassword = $state(false);
 
   // Ports are edited as strings so "no such service" shows as an empty box
   // rather than a literal 0 — binding a number would render the zero.
   const portText = (n: number) => (n ? String(n) : "");
-  let sshPort = $state(portText(host.port));
-  let telnetPort = $state(portText(host.telnet_port));
-  let pvePort = $state(portText(host.pve_port));
-  let pbsPort = $state(portText(host.pbs_port));
-  let httpPort = $state(portText(host.http_port));
-  let httpsPort = $state(portText(host.https_port));
+  let sshPort = $state("");
+  let telnetPort = $state("");
+  let pvePort = $state("");
+  let pbsPort = $state("");
+  let httpPort = $state("");
+  let httpsPort = $state("");
   const portNum = (s: string) => Number(s.trim()) || 0;
-  let extraText = $state(
-    Object.entries(host.extra_options ?? {})
-      .map(([k, v]) => `${k} ${v}`)
-      .join("\n"),
-  );
+  let extraText = $state("");
   let saving = $state(false);
 
   // currentId flips from 0 once a new host is persisted, so a later Save updates
   // (PUT) instead of re-creating (POST) and hitting the unique-alias constraint.
-  let currentId = $state(host.id);
+  let currentId = $state(0);
   const isNew = $derived(currentId === 0);
 
   // ---- IdentityFile as a dropdown of known keys ----
   const CUSTOM = "__custom__";
   let identSel = $state("");
   let customPath = $state("");
-  // Initialise selection from the host's existing IdentityFile path.
-  {
-    const known = app.keys.find((k) => k.private_path === host.identity_file);
-    if (host.identity_file) {
-      if (known) identSel = known.private_path;
-      else {
-        identSel = CUSTOM;
-        customPath = host.identity_file;
-      }
+  $effect.pre(() => {
+    const selected = host;
+    form = { ...selected, extra_options: { ...(selected.extra_options ?? {}) } };
+    tagsText = selected.tags.join(", ");
+    passwordInput = "";
+    clearPassword = false;
+    sshPort = portText(selected.port);
+    telnetPort = portText(selected.telnet_port);
+    pvePort = portText(selected.pve_port);
+    pbsPort = portText(selected.pbs_port);
+    httpPort = portText(selected.http_port);
+    httpsPort = portText(selected.https_port);
+    extraText = Object.entries(selected.extra_options ?? {})
+      .map(([k, v]) => `${k} ${v}`)
+      .join("\n");
+    currentId = selected.id;
+    identSel = "";
+    customPath = "";
+    if (selected.identity_file) {
+      const known = untrack(() => app.keys.some((k) => k.private_path === selected.identity_file));
+      identSel = known ? selected.identity_file : CUSTOM;
+      if (!known) customPath = selected.identity_file;
     }
-  }
+  });
   function onIdentChange() {
     form.identity_file = identSel === CUSTOM ? customPath : identSel;
   }
@@ -160,10 +192,8 @@
   }
 </script>
 
-<div class="overlay" onclick={onclose}>
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="modal" onclick={(e) => e.stopPropagation()}>
-    <h2>{isNew ? "New host" : `Edit ${host.alias}`}</h2>
+<Modal titleId="host-editor-title" {onclose}>
+    <h2 id="host-editor-title">{isNew ? "New host" : `Edit ${host.alias}`}</h2>
 
     <div class="field">
       <label for="alias">Alias (ssh_config Host) *</label>
@@ -327,8 +357,7 @@
         {saving ? "Saving…" : "Save"}
       </button>
     </div>
-  </div>
-</div>
+</Modal>
 
 <style>
   .deploybox {

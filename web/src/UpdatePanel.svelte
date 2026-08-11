@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api, runUpdate, updateStatus, type UpdateStatus } from "./api";
+  import Modal from "./Modal.svelte";
   import { update, refreshUpdate, notify, lock } from "./store.svelte";
 
   // The confirmation step. The user asked for an update, we ask about the
@@ -188,10 +189,8 @@
 
 
 {#if confirming}
-  <div class="overlay" onclick={() => (confirming = false)}>
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
-      <h2>Update to {info?.latest}</h2>
+  <Modal titleId="update-title" onclose={() => (confirming = false)}>
+      <h2 id="update-title">Update to {info?.latest}</h2>
       <p class="muted" style="margin-top:0">
         An update rebuilds webssh from the new tag. It does not change your data — but a new
         version may migrate the database, and a migration is the one step checking the old tag
@@ -231,8 +230,7 @@
           {wantBackup ? "Back up and update" : "Update without a backup"}
         </button>
       </div>
-    </div>
-  </div>
+  </Modal>
 {/if}
 
 <style>

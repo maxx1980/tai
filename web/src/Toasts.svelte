@@ -4,8 +4,9 @@
 
 <div class="toasts">
   {#each toasts.items as t (t.id)}
-    <div class="toast {t.kind}" onclick={() => dismiss(t.id)} role="alert">
-      {t.text}
+    <div class="toast {t.kind}" role="alert">
+      <span>{t.text}</span>
+      <button class="dismiss" aria-label="Dismiss notification" onclick={() => dismiss(t.id)}>×</button>
     </div>
   {/each}
 </div>
@@ -25,10 +26,22 @@
     padding: 10px 14px;
     border-radius: 8px;
     box-shadow: var(--shadow);
-    cursor: pointer;
     border: 1px solid var(--border);
     background: var(--panel);
     animation: slide 0.15s ease-out;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .toast span { flex: 1; }
+  .dismiss {
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    padding: 0 2px;
+    min-width: auto;
+    font-size: 18px;
+    line-height: 1;
   }
   .toast.error { border-left: 4px solid var(--danger); }
   .toast.success { border-left: 4px solid var(--success); }

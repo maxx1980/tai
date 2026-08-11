@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from "./api";
+  import Modal from "./Modal.svelte";
   import { app, refresh, notify } from "./store.svelte";
   import type { KnownHost } from "./types";
 
@@ -8,7 +9,7 @@
   // Add / paste modal.
   let addOpen = $state(false);
   let addText = $state("");
-  let addInput: HTMLInputElement;
+  let addInput = $state<HTMLInputElement>();
 
   // Scan-host modal.
   let scanOpen = $state(false);
@@ -171,14 +172,12 @@
 </div>
 
 {#if addOpen}
-  <div class="overlay" onclick={() => (addOpen = false)}>
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
-      <h2>Add known-host entries</h2>
+  <Modal titleId="known-host-add-title" onclose={() => (addOpen = false)}>
+      <h2 id="known-host-add-title">Add known-host entries</h2>
       <div class="field">
         <div class="row" style="justify-content:space-between">
           <label for="khtext" style="margin:0">Paste known_hosts lines</label>
-          <button class="sm ghost" onclick={() => addInput.click()}>Choose file…</button>
+          <button class="sm ghost" onclick={() => addInput?.click()}>Choose file…</button>
         </div>
         <textarea id="khtext" rows="6" class="mono" bind:value={addText}
           placeholder="host.example.com ssh-ed25519 AAAA…&#10;[10.0.0.5]:2222 ssh-rsa AAAA…"></textarea>
@@ -189,15 +188,12 @@
         <button onclick={() => (addOpen = false)}>Cancel</button>
         <button class="primary" onclick={doAdd} disabled={busy}>Add</button>
       </div>
-    </div>
-  </div>
+  </Modal>
 {/if}
 
 {#if scanOpen}
-  <div class="overlay" onclick={() => (scanOpen = false)}>
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
-      <h2>Scan host keys</h2>
+  <Modal titleId="known-host-scan-title" onclose={() => (scanOpen = false)}>
+      <h2 id="known-host-scan-title">Scan host keys</h2>
       <p class="muted" style="margin-top:0">
         Runs <span class="mono">ssh-keyscan</span> and stores the host's public keys.
       </p>
@@ -216,8 +212,7 @@
         <button onclick={() => (scanOpen = false)}>Cancel</button>
         <button class="primary" onclick={doScan} disabled={busy}>{busy ? "Scanning…" : "Scan"}</button>
       </div>
-    </div>
-  </div>
+  </Modal>
 {/if}
 
 <style>

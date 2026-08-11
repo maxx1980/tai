@@ -11,6 +11,7 @@
     type ScanResult,
     type ServiceKind,
   } from "./types";
+  import Modal from "./Modal.svelte";
   import ScanPanel from "./ScanPanel.svelte";
 
   let {
@@ -671,18 +672,15 @@
 {/if}
 
 {#if mountPw}
-  <div class="overlay" onclick={() => (mountPw = null)}>
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal" onclick={(e) => e.stopPropagation()} style="max-width:420px">
-      <h2>Password for {mountPw.host.alias}</h2>
+  <Modal titleId="mount-password-title" onclose={() => (mountPw = null)} maxWidth="420px">
+      <h2 id="mount-password-title">Password for {mountPw.host.alias}</h2>
       <p class="muted" style="margin-top:0">
         No deployed key worked for this host. Enter the SSH password to mount over sshfs
         (used once, not stored). Tip: deploy a key from the Keys tab for passwordless access.
       </p>
       <div class="field">
         <label for="mpw">SSH password</label>
-        <!-- svelte-ignore a11y_autofocus -->
-        <input id="mpw" type="password" bind:value={mountPwValue} autofocus
+        <input id="mpw" type="password" bind:value={mountPwValue}
           onkeydown={(e) => e.key === "Enter" && submitMountPw()} />
       </div>
       <div class="row">
@@ -690,8 +688,7 @@
         <button onclick={() => (mountPw = null)}>Cancel</button>
         <button class="primary" onclick={submitMountPw}>Mount</button>
       </div>
-    </div>
-  </div>
+  </Modal>
 {/if}
 
 <style>

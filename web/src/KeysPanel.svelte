@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api, importKey, exportKey, ApiError } from "./api";
+  import Modal from "./Modal.svelte";
   import { app, refresh, notify } from "./store.svelte";
   import type { Key } from "./types";
 
@@ -14,8 +15,8 @@
   let privText = $state("");
   let pubText = $state("");
   let overwriteWarn = $state(false);
-  let privInput: HTMLInputElement;
-  let pubInput: HTMLInputElement;
+  let privInput = $state<HTMLInputElement>();
+  let pubInput = $state<HTMLInputElement>();
 
   function openImport() {
     importOpen = true;
@@ -342,10 +343,8 @@
 </div>
 
 {#if genOpen}
-  <div class="overlay" onclick={() => (genOpen = false)}>
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
-      <h2>Generate SSH key</h2>
+  <Modal titleId="generate-key-title" onclose={() => (genOpen = false)}>
+      <h2 id="generate-key-title">Generate SSH key</h2>
       <div class="field">
         <label for="kname">Name *</label>
         <input id="kname" bind:value={gen.name} placeholder="id_acme_prod"
@@ -389,15 +388,12 @@
           <button class="primary" onclick={() => generate(false)} disabled={busy}>Generate</button>
         {/if}
       </div>
-    </div>
-  </div>
+  </Modal>
 {/if}
 
 {#if delKey}
-  <div class="overlay" onclick={() => (delKey = null)}>
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
-      <h2>Delete key “{delKey.name}”</h2>
+  <Modal titleId="delete-key-title" onclose={() => (delKey = null)}>
+      <h2 id="delete-key-title">Delete key “{delKey.name}”</h2>
       <p class="muted" style="margin-top:0">
         The key is removed from webssh and from the list of keys deployed to hosts.
         Already-deployed public keys stay on the remote hosts.
@@ -426,15 +422,12 @@
           {delFiles ? "Delete key and files" : "Forget key"}
         </button>
       </div>
-    </div>
-  </div>
+  </Modal>
 {/if}
 
 {#if importOpen}
-  <div class="overlay" onclick={() => (importOpen = false)}>
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
-      <h2>Import SSH key</h2>
+  <Modal titleId="import-key-title" onclose={() => (importOpen = false)}>
+      <h2 id="import-key-title">Import SSH key</h2>
       <div class="field">
         <label for="iname">Name *</label>
         <input id="iname" bind:value={impName} placeholder="id_acme_prod"
@@ -443,7 +436,7 @@
       <div class="field">
         <div class="row" style="justify-content:space-between">
           <label for="ipriv" style="margin:0">Private key *</label>
-          <button class="sm ghost" onclick={() => privInput.click()}>Choose file…</button>
+          <button class="sm ghost" onclick={() => privInput?.click()}>Choose file…</button>
         </div>
         <textarea id="ipriv" rows="5" class="mono" bind:value={privText}
           placeholder="Choose a file above, or paste the private key here&#10;-----BEGIN OPENSSH PRIVATE KEY-----&#10;…"
@@ -454,7 +447,7 @@
       <div class="field">
         <div class="row" style="justify-content:space-between">
           <label for="ipub" style="margin:0">Public key (.pub) — optional, derived if unencrypted</label>
-          <button class="sm ghost" onclick={() => pubInput.click()}>Choose file…</button>
+          <button class="sm ghost" onclick={() => pubInput?.click()}>Choose file…</button>
         </div>
         <textarea id="ipub" rows="2" class="mono" bind:value={pubText}
           placeholder="ssh-ed25519 AAAA… (optional)"></textarea>
@@ -478,15 +471,12 @@
           <button class="primary" onclick={() => doImport(false)} disabled={busy}>Import</button>
         {/if}
       </div>
-    </div>
-  </div>
+  </Modal>
 {/if}
 
 {#if deployKey}
-  <div class="overlay" onclick={() => (deployKey = null)}>
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
-      <h2>Deploy “{deployKey.name}”</h2>
+  <Modal titleId="deploy-key-title" onclose={() => (deployKey = null)}>
+      <h2 id="deploy-key-title">Deploy “{deployKey.name}”</h2>
       <p class="muted" style="margin-top:0">
         Appends the public key to <span class="mono">~/.ssh/authorized_keys</span> on the selected
         hosts. Each host's <strong>saved password</strong> is used; the fallback below applies only to
@@ -519,15 +509,12 @@
           {busy ? "Deploying…" : `Deploy to ${selectedHosts.size}`}
         </button>
       </div>
-    </div>
-  </div>
+  </Modal>
 {/if}
 
 {#if credKey}
-  <div class="overlay" onclick={() => (credKey = null)}>
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
-      <h2>Set credentials</h2>
+  <Modal titleId="credentials-title" onclose={() => (credKey = null)}>
+      <h2 id="credentials-title">Set credentials</h2>
       <p class="muted" style="margin-top:0">
         Saves a login and/or password locally for the selected hosts, and can set
         <span class="mono">{credKey.name}</span> as their IdentityFile. Nothing is sent over
@@ -569,13 +556,12 @@
           {busy ? "Saving…" : `Save to ${selectedHosts.size}`}
         </button>
       </div>
-    </div>
-  </div>
+  </Modal>
 {/if}
 
 {#snippet hostPicker()}
   <div class="row" style="justify-content:space-between;align-items:baseline">
-    <label style="margin:0">Target hosts</label>
+    <span class="muted" style="font-size:12.5px">Target hosts</span>
     <div class="muted" style="font-size:12px">
       {selectedHosts.size} selected ·
       <button class="linkbtn" onclick={selectAll}>All</button> ·

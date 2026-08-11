@@ -1,5 +1,6 @@
 <script lang="ts">
   import { sftp, ApiError, type SftpEntry } from "./api";
+  import Modal from "./Modal.svelte";
   import { notify } from "./store.svelte";
 
   let { hostId, alias, onclose }: { hostId: number; alias: string; onclose: () => void } =
@@ -190,18 +191,15 @@
 </div>
 
 {#if showPw}
-  <div class="overlay" onclick={() => (showPw = false)}>
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal" onclick={(ev) => ev.stopPropagation()} style="max-width:420px">
-      <h2>Password for {alias}</h2>
+  <Modal titleId="sftp-password-title" onclose={() => (showPw = false)} maxWidth="420px">
+      <h2 id="sftp-password-title">Password for {alias}</h2>
       <p class="muted" style="margin-top:0">
         No deployed key worked. Enter the SSH password to browse files (used for this
         session only, not stored). Deploy a key from the Keys tab for passwordless access.
       </p>
       <div class="field">
         <label for="sfpw">SSH password</label>
-        <!-- svelte-ignore a11y_autofocus -->
-        <input id="sfpw" type="password" bind:value={pwValue} autofocus
+        <input id="sfpw" type="password" bind:value={pwValue}
           onkeydown={(ev) => ev.key === "Enter" && submitPw()} />
       </div>
       <div class="row">
@@ -209,8 +207,7 @@
         <button onclick={() => (showPw = false)}>Cancel</button>
         <button class="primary" onclick={submitPw}>Connect</button>
       </div>
-    </div>
-  </div>
+  </Modal>
 {/if}
 
 <style>

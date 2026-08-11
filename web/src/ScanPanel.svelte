@@ -2,6 +2,7 @@
   // Network discovery modal: expand a target spec, probe it for open SSH/telnet
   // ports, then add the machines that answered to the inventory.
   import { api } from "./api";
+  import Modal from "./Modal.svelte";
   import { app, refresh, notify } from "./store.svelte";
   import { portsFromScan, type Host, type ScanHost, type ScanResult } from "./types";
 
@@ -142,10 +143,8 @@
   }
 </script>
 
-<div class="overlay" onclick={onClose}>
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="modal wide" onclick={(e) => e.stopPropagation()}>
-    <h2>Scan the network for hosts</h2>
+<Modal titleId="scan-title" onclose={onClose} wide>
+    <h2 id="scan-title">Scan the network for hosts</h2>
 
     <div class="field">
       <label for="scan-targets">Addresses to scan</label>
@@ -269,11 +268,9 @@
         </button>
       {/if}
     </div>
-  </div>
-</div>
+</Modal>
 
 <style>
-  .modal.wide { max-width: 760px; }
   .hint { font-size: 12px; margin: 6px 0 0; }
   .opts { flex-wrap: wrap; gap: 14px; margin-bottom: 12px; align-items: flex-end; }
   .check { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; color: var(--text); }
