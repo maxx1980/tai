@@ -54,12 +54,49 @@ func (s *Server) saveBackup(password, name string) (string, error) {
 		return "", err
 	}
 	path := filepath.Join(dir, name)
-	// It holds saved host passwords and private keys — encrypted, but the file
-	// mode costs nothing and the directory is 0700 already.
-	if err := os.WriteFile(path, enc, 0o600); err != nil {
+	// Publish only a fully written and synced file. A crash or failed write may
+	// leave a hidden temporary file, but never a truncated backup in the list.
+	if err := writeBackupAtomic(path, enc); err != nil {
 		return "", err
 	}
 	return path, nil
+}
+
+func writeBackupAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".backup-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	closed := false
+	defer func() {
+		if !closed {
+			_ = tmp.Close()
+		}
+		_ = os.Remove(tmpName)
+	}()
+	if err := tmp.Chmod(0o600); err != nil {
+		return err
+	}
+	n, err := tmp.Write(data)
+	if err != nil {
+		return err
+	}
+	if n != len(data) {
+		return fmt.Errorf("write backup: wrote %d of %d bytes", n, len(data))
+	}
+	if err := tmp.Sync(); err != nil {
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	closed = true
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	return nil
 }
 
 // handleListBackups lists the backups on this machine, newest first.

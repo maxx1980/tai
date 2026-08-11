@@ -12,6 +12,7 @@ import (
 
 	"webssh/internal/backup"
 	"webssh/internal/config"
+	"webssh/internal/keys"
 	"webssh/internal/store"
 )
 
@@ -114,12 +115,18 @@ func (s *Server) exportEncrypted(password string) ([]byte, error) {
 	}
 	// Read each key's private-key file into the snapshot so backups are portable.
 	for i := range snap.Keys {
-		if snap.Keys[i].PrivatePath == "" {
-			continue
+		k := &snap.Keys[i]
+		if k.PrivatePath == "" {
+			return nil, fmt.Errorf("read private key %q: path is empty", k.Name)
 		}
-		if data, rerr := os.ReadFile(snap.Keys[i].PrivatePath); rerr == nil {
-			snap.Keys[i].PrivateKeyData = data
+		data, err := os.ReadFile(k.PrivatePath)
+		if err != nil {
+			return nil, fmt.Errorf("read private key %q: %w", k.Name, err)
 		}
+		if len(data) == 0 {
+			return nil, fmt.Errorf("read private key %q: file is empty", k.Name)
+		}
+		k.PrivateKeyData = data
 	}
 	plain, err := json.Marshal(snap)
 	if err != nil {
@@ -141,36 +148,30 @@ func (s *Server) restoreEncrypted(password string, data []byte) (*store.Snapshot
 	if err := json.Unmarshal(plain, &snap); err != nil {
 		return nil, 400, errors.New("backup is not valid")
 	}
+	if err := validateRestoredKeys(&snap); err != nil {
+		return nil, 400, err
+	}
 
-	// Write key files back to disk and point each record at the new location.
-	dir := s.keysDir()
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	// Build the complete replacement keyset beside the live directory. Nothing
+	// visible is changed until every file has been written successfully.
+	keyset, err := prepareKeyRestore(s.keysDir(), &snap)
+	if err != nil {
 		return nil, 500, err
 	}
-	for i := range snap.Keys {
-		k := &snap.Keys[i]
-		if k.Name == "" || strings.ContainsAny(k.Name, "/\\") {
-			continue
-		}
-		priv := filepath.Join(dir, k.Name)
-		// Remove any existing files first: a leftover key may be read-only (0400),
-		// which would make WriteFile's truncate fail with "permission denied".
-		_ = os.Remove(priv)
-		_ = os.Remove(priv + ".pub")
-		if len(k.PrivateKeyData) > 0 {
-			if err := os.WriteFile(priv, k.PrivateKeyData, 0o600); err != nil {
-				return nil, 500, fmt.Errorf("write key %s: %w", k.Name, err)
-			}
-		}
-		if k.PublicKey != "" {
-			_ = os.WriteFile(priv+".pub", []byte(strings.TrimSpace(k.PublicKey)+"\n"), 0o644)
-		}
-		k.PrivatePath = priv
+	defer keyset.cleanup()
+	if err := keyset.install(); err != nil {
+		return nil, 500, err
 	}
 
 	if err := s.st.ImportAll(&snap); err != nil {
+		if rollbackErr := keyset.rollback(); rollbackErr != nil {
+			return nil, 500, fmt.Errorf("import backup: %v; restore key files: %w", err, rollbackErr)
+		}
 		return nil, 500, err
 	}
+	// The database now points at the installed keyset. Failure to remove the
+	// retired directory is harmless: it is no longer the active path.
+	_ = keyset.commit()
 	// The restore may have changed authentication settings or introduced a
 	// different master password. Apply the token setting immediately and drop all
 	// unlock sessions so no pre-restore authorization survives.
@@ -178,6 +179,150 @@ func (s *Server) restoreEncrypted(password string, data []byte) (*store.Snapshot
 	s.clearSessions()
 	s.autoExport()
 	return &snap, 200, nil
+}
+
+// validateRestoredKeys rejects snapshots that cannot produce a complete,
+// unambiguous key directory. Older code silently skipped such entries and
+// could report a successful restore with missing private keys.
+func validateRestoredKeys(snap *store.Snapshot) error {
+	if snap.Version != 1 {
+		return fmt.Errorf("unsupported backup version %d", snap.Version)
+	}
+	seen := make(map[string]struct{}, len(snap.Keys))
+	for _, k := range snap.Keys {
+		if err := keys.ValidName(k.Name); err != nil {
+			return fmt.Errorf("invalid key %q: %w", k.Name, err)
+		}
+		if _, exists := seen[k.Name]; exists {
+			return fmt.Errorf("duplicate key name %q", k.Name)
+		}
+		seen[k.Name] = struct{}{}
+		if len(k.PrivateKeyData) == 0 {
+			return fmt.Errorf("private key %q is missing from backup", k.Name)
+		}
+	}
+	return nil
+}
+
+// keyRestore owns the staged, active and retired key directories during a
+// restore. All directories share a parent so each switch is an atomic rename.
+type keyRestore struct {
+	target      string
+	staged      string
+	previous    string
+	hadPrevious bool
+	installed   bool
+}
+
+func prepareKeyRestore(target string, snap *store.Snapshot) (*keyRestore, error) {
+	parent := filepath.Dir(target)
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		return nil, err
+	}
+	staged, err := os.MkdirTemp(parent, ".keys-restore-")
+	if err != nil {
+		return nil, err
+	}
+	r := &keyRestore{target: target, staged: staged, previous: staged + ".previous"}
+	ok := false
+	defer func() {
+		if !ok {
+			_ = os.RemoveAll(staged)
+		}
+	}()
+
+	for i := range snap.Keys {
+		k := &snap.Keys[i]
+		priv := filepath.Join(staged, k.Name)
+		if err := os.WriteFile(priv, k.PrivateKeyData, 0o600); err != nil {
+			return nil, fmt.Errorf("stage key %q: %w", k.Name, err)
+		}
+		if k.PublicKey != "" {
+			pub := []byte(strings.TrimSpace(k.PublicKey) + "\n")
+			if err := os.WriteFile(priv+".pub", pub, 0o644); err != nil {
+				return nil, fmt.Errorf("stage public key %q: %w", k.Name, err)
+			}
+		}
+		// ImportAll must store the final path, not the temporary one.
+		k.PrivatePath = filepath.Join(target, k.Name)
+	}
+	ok = true
+	return r, nil
+}
+
+func (r *keyRestore) install() error {
+	if _, err := os.Lstat(r.target); err == nil {
+		if err := os.Rename(r.target, r.previous); err != nil {
+			return fmt.Errorf("retire current key directory: %w", err)
+		}
+		r.hadPrevious = true
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("inspect current key directory: %w", err)
+	}
+
+	if err := os.Rename(r.staged, r.target); err != nil {
+		if r.hadPrevious {
+			if rollbackErr := os.Rename(r.previous, r.target); rollbackErr != nil {
+				return fmt.Errorf("install restored key directory: %v; restore current directory: %w", err, rollbackErr)
+			}
+			r.hadPrevious = false
+		}
+		return fmt.Errorf("install restored key directory: %w", err)
+	}
+	r.installed = true
+	return nil
+}
+
+func (r *keyRestore) rollback() error {
+	if !r.installed {
+		return nil
+	}
+	// Move the rejected keyset out of the way first, then put the old directory
+	// back. If the second rename fails, reinstall the new directory so files are
+	// at least not left absent.
+	if err := os.Rename(r.target, r.staged); err != nil {
+		return fmt.Errorf("remove rejected key directory: %w", err)
+	}
+	if r.hadPrevious {
+		if err := os.Rename(r.previous, r.target); err != nil {
+			_ = os.Rename(r.staged, r.target)
+			return fmt.Errorf("reinstate previous key directory: %w", err)
+		}
+		r.hadPrevious = false
+	}
+	r.installed = false
+	if err := os.RemoveAll(r.staged); err != nil {
+		return fmt.Errorf("remove rejected key files: %w", err)
+	}
+	return nil
+}
+
+func (r *keyRestore) commit() error {
+	if !r.hadPrevious {
+		return nil
+	}
+	if err := os.RemoveAll(r.previous); err != nil {
+		return err
+	}
+	r.hadPrevious = false
+	return nil
+}
+
+func (r *keyRestore) cleanup() {
+	// If install moved the old directory aside but could not put either keyset
+	// at the active path, make one final best-effort attempt to restore it. Never
+	// delete r.previous here: on an exceptional rollback failure it is the only
+	// intact copy of the pre-restore keys.
+	if !r.installed && r.hadPrevious {
+		if _, err := os.Lstat(r.target); os.IsNotExist(err) {
+			if os.Rename(r.previous, r.target) == nil {
+				r.hadPrevious = false
+			}
+		}
+	}
+	if !r.installed {
+		_ = os.RemoveAll(r.staged)
+	}
 }
 
 // handleBackup verifies the master password and writes an encrypted dump of the
