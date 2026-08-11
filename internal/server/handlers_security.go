@@ -171,8 +171,10 @@ func (s *Server) restoreEncrypted(password string, data []byte) (*store.Snapshot
 	if err := s.st.ImportAll(&snap); err != nil {
 		return nil, 500, err
 	}
-	// The restore may have changed (or introduced) the master password, so drop
-	// all unlock sessions: the SPA will re-lock and prompt with the restored one.
+	// The restore may have changed authentication settings or introduced a
+	// different master password. Apply the token setting immediately and drop all
+	// unlock sessions so no pre-restore authorization survives.
+	s.syncAuthDisabled()
 	s.clearSessions()
 	s.autoExport()
 	return &snap, 200, nil
@@ -259,6 +261,9 @@ func (s *Server) handleReset(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err)
 		return
 	}
+	// ResetAll removed auth_disabled from the database; restore the secure default
+	// immediately rather than leaving the cached bypass enabled until restart.
+	s.syncAuthDisabled()
 	// Delete the managed key files (created/imported by webssh).
 	if entries, derr := os.ReadDir(s.keysDir()); derr == nil {
 		for _, e := range entries {

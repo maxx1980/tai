@@ -793,6 +793,9 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err)
 		return
 	}
+	// A later setting write can fail after auth_disabled was already persisted.
+	// Defer the refresh so the cache still follows the database on every exit.
+	defer s.syncAuthDisabled()
 	for k, v := range body {
 		if k == config.KeyMasterPassword {
 			continue // reserved: set only via PUT /api/settings/password
@@ -802,8 +805,6 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// Keep the cached auth-disabled flag in sync with the stored setting.
-	s.authDisabled.Store(s.st.GetSetting(config.KeyAuthDisabled, "") == "1")
 	writeJSON(w, 200, s.settingsWithDefaults())
 }
 

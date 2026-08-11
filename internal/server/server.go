@@ -86,9 +86,16 @@ func New(st *store.Store, paths config.Paths, token string, assets fs.FS, hc *he
 		sessions: map[string]struct{}{},
 		quit:     make(chan struct{}),
 	}
-	s.authDisabled.Store(st.GetSetting(config.KeyAuthDisabled, "") == "1")
+	s.syncAuthDisabled()
 	s.routes()
 	return s
+}
+
+// syncAuthDisabled refreshes the in-memory fast path used by HTTP and websocket
+// authentication. Settings can be replaced wholesale by restore/reset, so
+// every successful settings mutation must call this before returning.
+func (s *Server) syncAuthDisabled() {
+	s.authDisabled.Store(s.st.GetSetting(config.KeyAuthDisabled, "") == "1")
 }
 
 // masterPasswordSet reports whether a master password has been configured.
