@@ -67,12 +67,33 @@ func runningUnderWSL() bool {
 	return err == nil && strings.Contains(strings.ToLower(string(b)), "microsoft")
 }
 
+// RunningUnderTermux reports whether the process is running inside Termux,
+// the Linux userland app for Android. Termux sets both of these for every
+// process it launches, unlike a kernel signature (Android's kernel string
+// carries no Termux marker the way WSL's does).
+func RunningUnderTermux() bool {
+	return strings.Contains(os.Getenv("PREFIX"), "com.termux") || os.Getenv("TERMUX_VERSION") != ""
+}
+
 // Defaults returns the default value for a setting key.
 func Defaults(home string) map[string]string {
 	// {{alias}} {{user}} {{host}} {{port}} {{mountpoint}} are substituted at spawn time.
 	terminalCmd := "gnome-terminal -- ssh {{alias}}"
 	filesCmd := "xdg-open {{mountpoint}}"
-	if runningUnderWSL() {
+	terminalMode := "both"
+	filesMode := "both"
+	uiMode := "app"
+	if RunningUnderTermux() {
+		// No desktop environment, no gnome-terminal/xdg-open, no FUSE/sshfs and
+		// no chromium binary to drive an app window — leave the native-launch
+		// commands empty and default every host card to its web-only buttons,
+		// which are the only ones guaranteed to work out of the box.
+		terminalCmd = ""
+		filesCmd = ""
+		terminalMode = "web"
+		filesMode = "web"
+		uiMode = "browser"
+	} else if runningUnderWSL() {
 		// No desktop environment inside WSL — reach out to the Windows host
 		// instead via WSL2 interop (Win32 binaries are on PATH there). Assumes
 		// an apt-based distro with sshfs installed (webssh-setup.exe does
@@ -99,11 +120,11 @@ func Defaults(home string) map[string]string {
 		KeyMountBaseDir:    filepath.Join(home, "mnt", "webssh"),
 		KeyTheme:           "system",
 		KeyTelnetBackspace: "bs",
-		KeyTerminalMode:    "both",
-		KeyFilesMode:       "both",
+		KeyTerminalMode:    terminalMode,
+		KeyFilesMode:       filesMode,
 		KeyAuthDisabled:    "",
 		KeyExitOnClose:     "1",
-		KeyUIMode:          "app",
+		KeyUIMode:          uiMode,
 		KeyAppBrowser:      "",
 	}
 }

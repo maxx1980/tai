@@ -1,4 +1,4 @@
-.PHONY: all ui build build-webview run clean deps dev icons syso build-windows setup-syso build-windows-setup launcher-syso build-windows-launcher uninstall-syso build-windows-uninstall install-desktop uninstall-desktop dist dist-windows dist-all
+.PHONY: all ui build build-webview run clean deps dev icons syso build-windows setup-syso build-windows-setup launcher-syso build-windows-launcher uninstall-syso build-windows-uninstall install-desktop uninstall-desktop dist dist-termux-src dist-windows dist-all
 
 BINARY := webssh
 # VERSION is stamped into the binary so the updater can compare it with the
@@ -16,6 +16,7 @@ ICON_DIR := $(HOME)/.local/share/icons/hicolor
 ARCH ?= $(shell go env GOARCH)
 DIST_DIR := dist
 DIST_NAME := $(BINARY)-$(VERSION)-linux-$(ARCH)
+DIST_TERMUX_NAME := $(BINARY)-$(VERSION)-termux-src
 
 all: build
 
@@ -105,6 +106,29 @@ dist: ui
 	cd $(DIST_DIR) && sha256sum *.tar.gz > SHA256SUMS
 	@echo "==> $(DIST_DIR)/$(DIST_NAME).tar.gz"
 
+# dist-termux-src packs a source tarball for Termux: cmd/, internal/, web/
+# (with web/dist already built, so Termux never needs Node — only Go), go.mod
+# and go.sum. No release *binary* works under Termux's bionic dynamic linker
+# (see internal/config's RunningUnderTermux doc): a plain CGO_ENABLED=0
+# GOOS=linux build gets rejected outright (non-PIE), and even a PIE rebuild
+# fails bionic's TLS-segment alignment check on modern Android. The only
+# binary that actually runs is one built with GOOS=android CGO_ENABLED=1 —
+# which is exactly what `pkg install golang` inside Termux itself defaults
+# to — so packaging/termux/install.sh has Termux build from this source
+# tarball instead of downloading a prebuilt binary.
+dist-termux-src: ui
+	rm -rf $(DIST_DIR)/$(DIST_TERMUX_NAME)
+	mkdir -p $(DIST_DIR)/$(DIST_TERMUX_NAME)
+	cp -r cmd internal web go.mod go.sum $(DIST_DIR)/$(DIST_TERMUX_NAME)/
+	rm -rf $(DIST_DIR)/$(DIST_TERMUX_NAME)/web/node_modules
+	mkdir -p $(DIST_DIR)/$(DIST_TERMUX_NAME)/packaging/termux
+	install -m755 packaging/termux/install.sh $(DIST_DIR)/$(DIST_TERMUX_NAME)/packaging/termux/install.sh
+	install -m755 packaging/termux/webssh.sh $(DIST_DIR)/$(DIST_TERMUX_NAME)/packaging/termux/webssh.sh
+	tar -czf $(DIST_DIR)/$(DIST_TERMUX_NAME).tar.gz -C $(DIST_DIR) $(DIST_TERMUX_NAME)
+	rm -rf $(DIST_DIR)/$(DIST_TERMUX_NAME)
+	cd $(DIST_DIR) && sha256sum *.tar.gz > SHA256SUMS
+	@echo "==> $(DIST_DIR)/$(DIST_TERMUX_NAME).tar.gz"
+
 # dist-windows builds webssh-setup.exe (which embeds webssh-launcher.exe and
 # webssh-uninstall.exe - nothing else needs publishing separately) and copies
 # it into the release directory under a versioned name. get.sh never reads
@@ -125,6 +149,7 @@ dist-all:
 	rm -rf $(DIST_DIR)
 	$(MAKE) dist ARCH=amd64
 	$(MAKE) dist ARCH=arm64
+	$(MAKE) dist-termux-src
 	$(MAKE) dist-windows
 	@echo
 	@cat $(DIST_DIR)/SHA256SUMS

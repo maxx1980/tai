@@ -177,7 +177,7 @@ func run(addr string, noOpen bool, uiFlag string) error {
 	if noOpen {
 		waitForStop()
 	} else {
-		mode := appwin.ParseMode(st.GetSetting(config.KeyUIMode, ""))
+		mode := appwin.ParseMode(st.GetSetting(config.KeyUIMode, config.Defaults(paths.Home)[config.KeyUIMode]))
 		if uiFlag != "" {
 			mode = appwin.ParseMode(uiFlag)
 		}

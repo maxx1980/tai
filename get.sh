@@ -112,6 +112,18 @@ if ((do_uninstall)); then
 fi
 
 # --- what we can install ----------------------------------------------------
+# Termux's uname -s also says "Linux" (same kernel), but its bionic dynamic
+# linker refuses this script's prebuilt binary outright: CGO_ENABLED=0
+# GOOS=linux is non-PIE, and even a PIE rebuild fails bionic's TLS-segment
+# alignment check on modern Android. The only binary that runs there is one
+# built with GOOS=android CGO_ENABLED=1, which packaging/termux/install.sh
+# builds on-device with Termux's own Go toolchain.
+if [[ -n ${TERMUX_VERSION:-} || ${PREFIX:-} == *com.termux* ]]; then
+	die "on Termux, use the Termux installer instead — it builds on-device \
+(no release binary runs under Termux's bionic linker):
+  curl -fsSL https://raw.githubusercontent.com/$REPO/main/packaging/termux/install.sh | bash"
+fi
+
 [[ $(uname -s) == Linux ]] || die "this installer is for Linux (found $(uname -s))"
 
 case "$(uname -m)" in

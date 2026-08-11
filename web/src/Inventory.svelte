@@ -138,6 +138,23 @@
     }
   }
 
+  // groupPath renders a group's full "Parent / Child" name, so nested groups
+  // with the same short name are still distinguishable in the "Move to…"
+  // picker (the touch-friendly fallback for drag-and-drop below).
+  function groupPath(id: number): string {
+    const g = app.groups.find((x) => x.id === id);
+    if (!g) return "";
+    const parent = g.parent_id != null ? groupPath(g.parent_id) : "";
+    return parent ? `${parent} / ${g.name}` : g.name;
+  }
+
+  const moveTargets = $derived([
+    { id: null as number | null, label: "Misc hosts" },
+    ...app.groups
+      .map((g) => ({ id: g.id as number | null, label: groupPath(g.id) }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
+  ]);
+
   // Descendant group ids (so selecting a parent includes children).
   function descendants(id: number): Set<number> {
     const set = new Set<number>([id]);
@@ -559,6 +576,27 @@
               {#each h.tags as t}<span class="tag">{t}</span>{/each}
             </div>
           {/if}
+          <!--
+            Touch fallback for the sidebar drag-and-drop: native HTML5 drag
+            has no touch equivalent, so this select is the only way to move a
+            host between groups on a phone. Hidden on wide screens, where
+            dragging the card onto the sidebar already does the job.
+          -->
+          <div class="row move-row">
+            <label class="muted" for="move-{h.id}" style="font-size:12px">Move to</label>
+            <select
+              id="move-{h.id}"
+              class="move-select"
+              aria-label="Move {h.alias} to group"
+              value={h.group_id != null ? String(h.group_id) : ""}
+              onchange={(e) =>
+                assignGroup(h.id, e.currentTarget.value === "" ? null : Number(e.currentTarget.value))}
+            >
+              {#each moveTargets as t (t.id)}
+                <option value={t.id != null ? String(t.id) : ""}>{t.label}</option>
+              {/each}
+            </select>
+          </div>
           <div class="row actions">
             <!-- SSH-backed actions only exist when the host has an SSH port. -->
             {#if h.port}
@@ -693,6 +731,18 @@
     background: var(--panel-2);
   }
   .tag-btn.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+
+  .move-row { display: none; align-items: center; gap: 8px; }
+  .move-select { width: auto; flex: 1; }
+
+  /* Narrow screens (phones): stack the sidebar above the host list instead of
+     beside it, always show the group-delete control (there is no hover on
+     touch), and surface the drag-and-drop fallback. */
+  @media (max-width: 720px) {
+    .inv { grid-template-columns: 1fr; grid-template-rows: minmax(0, 40%) minmax(0, 1fr); }
+    .del { visibility: visible; }
+    .move-row { display: flex; }
+  }
 
   .cards {
     display: grid;

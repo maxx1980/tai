@@ -130,7 +130,7 @@
   }
 </script>
 
-<div class="row" style="margin-bottom:14px">
+<div class="row toolbar" style="margin-bottom:14px">
   <h2 style="margin:0;font-size:16px">Known hosts</h2>
   <div class="spacer"></div>
   <button onclick={importFromSSH} disabled={busy}>Import from ~/.ssh</button>
@@ -151,7 +151,7 @@
 <div class="list">
   {#each app.known_hosts as kh (kh.id)}
     <div class="card">
-      <div class="row">
+      <div class="row hostrow">
         <strong class="hosts" title={kh.hosts}>{kh.hosts}</strong>
         <span class="tag">{kh.key_type}</span>
         {#if kh.marker}<span class="tag warn-tag">{kh.marker}</span>{/if}
@@ -221,6 +221,12 @@
 {/if}
 
 <style>
+  /* Narrow screens can't fit the toolbar or a host row's actions on one
+     line; let both wrap instead of squeezing every button's own label
+     into multiple lines. */
+  .toolbar { flex-wrap: wrap; row-gap: 8px; }
+  .hostrow { flex-wrap: wrap; row-gap: 6px; }
+  .hostrow button { white-space: nowrap; }
   .list { display: flex; flex-direction: column; gap: 10px; }
   .card {
     background: var(--panel);

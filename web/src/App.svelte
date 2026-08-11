@@ -154,12 +154,19 @@
     background: var(--panel);
     border-bottom: 1px solid var(--border);
   }
-  .brand { font-weight: 600; font-size: 15px; }
-  nav { display: flex; gap: 4px; }
-  nav button { background: transparent; border: none; padding: 6px 12px; color: var(--muted); }
+  .brand { font-weight: 600; font-size: 15px; flex-shrink: 0; }
+  /* min-width: 0 lets the flex item actually shrink below its content size,
+     so a narrow header scrolls its tabs sideways instead of squeezing each
+     button until its label wraps onto two lines. */
+  nav { display: flex; gap: 4px; overflow-x: auto; min-width: 0; }
+  nav button {
+    background: transparent; border: none; padding: 6px 12px; color: var(--muted);
+    white-space: nowrap; flex-shrink: 0;
+  }
   nav button.active { color: var(--text); background: var(--panel-2); }
   /* The one nav entry that appears on its own, so it says why it is there. */
   nav button.upd { color: var(--accent); font-weight: 600; }
+  header > button { flex-shrink: 0; }
   .content { flex: 1; min-height: 0; padding: 16px 18px; }
   .pad { height: 100%; }
   .term-overlay {

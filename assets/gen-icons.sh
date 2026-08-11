@@ -27,4 +27,8 @@ cp "$src" "$pub/favicon.svg"
 render 32 "$pub/favicon-32.png"
 render 180 "$pub/apple-touch-icon.png"
 
-echo "gen-icons: wrote assets/png/*.png and web/public/{favicon.svg,favicon-32.png,apple-touch-icon.png}"
+# sizes manifest.json wants for the Android "Add to Home Screen" prompt
+render 192 "$pub/icon-192.png"
+render 512 "$pub/icon-512.png"
+
+echo "gen-icons: wrote assets/png/*.png and web/public/{favicon.svg,favicon-32.png,apple-touch-icon.png,icon-192.png,icon-512.png}"

@@ -159,6 +159,51 @@ Prefer to install offline? Download the `.tar.gz` from the
 [releases page](https://github.com/maxx1980/tai/releases), unpack it and run the
 `get.sh` inside it: it installs the files next to it instead of downloading.
 
+### Android (via Termux)
+
+Android has no WSL-style compatibility layer, but it doesn't need one:
+[Termux](https://f-droid.org/packages/com.termux/) is a real Linux userland
+app. Install it from **F-Droid**, not the Play Store build, which is
+abandoned and can no longer reach GitHub or its own package mirrors. Then,
+*inside Termux*:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/maxx1980/tai/main/packaging/termux/install.sh | bash
+```
+
+This is a different installer from the one above, and deliberately so: no
+release *binary* runs under Termux's bionic dynamic linker on modern
+Android — a plain `CGO_ENABLED=0 GOOS=linux` build is rejected outright
+(non-PIE), and even a PIE rebuild fails bionic's TLS-segment alignment check.
+The only binary that actually runs is one built with `GOOS=android
+CGO_ENABLED=1` — exactly what `pkg install golang` defaults to inside Termux
+itself — so this script installs Go and `openssh` (the ssh client webssh's
+terminal shells out to), downloads the matching source tarball (`web/dist`
+ships prebuilt in it, so Termux never needs Node) and **builds webssh
+on-device**. A cold build compiles the whole module graph and can take a
+couple of minutes; re-runs are faster since Go's build cache survives
+between them.
+
+webssh then defaults every host card to its web-only buttons instead of ones
+that would fail on first tap: Android has no FUSE (so no `sshfs` mount, and
+no "Files" button) and no `gnome-terminal`/`xdg-open` equivalent (so no
+"Terminal" button) — use the **Web term** and **Browse** (SFTP) buttons
+instead, which need nothing beyond `openssh`. Auto-opening the token URL in a
+browser also needs a hop through Android, not a Linux `xdg-open`: install
+`pkg install termux-api` (and the
+[Termux:API](https://f-droid.org/packages/com.termux.api/) companion app) so
+webssh can hand the URL to Android's default browser; without it, the URL is
+still printed to the terminal, which is tap-to-open there.
+
+The installer also drops a one-tap launcher at `~/.shortcuts/webssh.sh` —
+install [Termux:Widget](https://f-droid.org/packages/com.termux.widget/),
+long-press the home screen, add a Termux:Widget widget, and pick **webssh**:
+it starts the daemon, waits for the token URL, and opens it the same way.
+
+Re-run the same one-liner to rebuild against the newest release; remove
+everything with `... | bash -s -- --uninstall` (data under
+`~/.local/share/webssh` is kept, same as the desktop uninstaller).
+
 ## Build & run
 
 Requirements: Go ≥ 1.25, Node ≥ 20, `rsvg-convert` (package `librsvg2-bin`, used to
@@ -259,18 +304,25 @@ removed with `get.sh --uninstall`.)
 
 ```sh
 make dist              # one archive for this machine's architecture
+make dist-termux-src   # source tarball packaging/termux/install.sh builds from
 make dist-windows      # webssh-setup.exe, versioned
-make dist-all          # amd64 + arm64 + webssh-setup.exe + SHA256SUMS covering all of it
+make dist-all          # amd64 + arm64 + termux-src + webssh-setup.exe + SHA256SUMS covering all of it
 ```
 
 Each Linux archive is `dist/webssh-<tag>-linux-<arch>.tar.gz` and holds the
 binary, the icons, the `.desktop` template and `get.sh` itself, which is what
 makes it installable offline; `dist-windows` instead produces one file,
 `dist/webssh-setup-<tag>.exe` (`webssh-launcher.exe`/`webssh-uninstall.exe`
-are embedded inside it, not published separately). Publishing a release means
+are embedded inside it, not published separately). `dist-termux-src` produces
+`dist/webssh-<tag>-termux-src.tar.gz` — no release *binary* runs under
+Termux's bionic dynamic linker (see [Android](#android-via-termux) above), so
+this ships `cmd/`, `internal/` and `web/` (with `web/dist` already built, so
+Termux never needs Node) for `packaging/termux/install.sh` to compile
+on-device with Termux's own Go toolchain. Publishing a release means
 tagging, running `make dist-all` on a clean checkout of that tag, and
-attaching every archive, the `.exe`, **and** `SHA256SUMS` — `get.sh` refuses
-to install without the checksums file.
+attaching every archive, the `.exe`, **and** `SHA256SUMS` — `get.sh` and
+`packaging/termux/install.sh` both refuse to install without the checksums
+file.
 
 ## Icons
 
@@ -307,7 +359,9 @@ inside WSL instead, until a real ConPTY backend lands.
   `backup`, `wslutil`/`wininstall` (Windows-only, shared by the three above).
 - `web/` — Svelte + Vite SPA, embedded into the binary via `web/embed.go`.
 - `assets/` — master `icon.svg` and the script that renders every raster size.
-- `packaging/` — `.desktop` template used by `make install-desktop` and `get.sh`.
+- `packaging/` — `.desktop` template used by `make install-desktop` and
+  `get.sh`; `packaging/termux/` holds the Android installer (`install.sh`,
+  builds on-device) and the Termux:Widget one-tap launcher (`webssh.sh`).
 - `get.sh` — the one-line installer for a prebuilt release (also removes it).
 - `get.ps1` — Windows installer: sets up WSL and a distro, then runs `get.sh` in it.
 - `get.bat` — double-click launcher for `get.ps1`, self-elevating via UAC when needed.

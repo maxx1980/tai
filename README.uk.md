@@ -168,6 +168,51 @@ Windows, тому URL з токеном відкривається в брауз
 запустіть `get.sh` зсередини архіву: він поставить файли, що лежать поруч, нічого
 не завантажуючи.
 
+### Android (через Termux)
+
+У Android немає аналога WSL, але він і не потрібен: [Termux](https://f-droid.org/packages/com.termux/) —
+це справжнє лінуксове середовище. Встановлюйте його з **F-Droid**, а не з
+Play Store: та збірка занедбана і більше не дістає до GitHub і власних
+дзеркал пакетів. Потім *усередині Termux*:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/maxx1980/tai/main/packaging/termux/install.sh | bash
+```
+
+Це інший встановлювач, ніж вище, і навмисно: жоден готовий *бінарник* з
+релізів не запускається під bionic-лінкером Termux на сучасному Android —
+звичайна збірка `CGO_ENABLED=0 GOOS=linux` відхиляється одразу (не-PIE), а
+навіть перезібрана як PIE — падає на перевірці вирівнювання TLS-сегмента в
+bionic. Реально працює лише бінарник, зібраний з `GOOS=android
+CGO_ENABLED=1` — це якраз те, на що за замовчуванням цілиться
+`pkg install golang` усередині самого Termux, — тому скрипт встановлює Go і
+`openssh` (ssh-клієнт, через який webssh запускає термінал), завантажує
+відповідний архів вихідного коду (`web/dist` у ньому вже зібраний, тож Node
+у Termux не потрібен) і **збирає webssh просто на пристрої**. Перша збірка
+компілює весь граф модулів і може зайняти кілька хвилин; повторні запуски
+швидші — кеш збірки Go зберігається між ними.
+
+webssh за замовчуванням вмикає на кожній картці хоста лише веб-кнопки — ті,
+що не відмовлять при першому натисканні: на Android немає FUSE (тобто немає
+монтування `sshfs` і кнопки "Files") і немає аналога `gnome-terminal`/`xdg-open`
+(тобто немає кнопки "Terminal") — замість них використовуйте **Web term** і
+**Browse** (SFTP), яким досить самого `openssh`. Автовідкриття URL з токеном
+у браузері також іде через Android, а не через лінуксовий `xdg-open`:
+встановіть `pkg install termux-api` (і застосунок
+[Termux:API](https://f-droid.org/packages/com.termux.api/)), щоб webssh міг
+передати URL браузеру за замовчуванням; без цього URL все одно друкується в
+термінал, а там він відкривається по тапу.
+
+Встановлювач сам кладе ярлик для одного тапу в `~/.shortcuts/webssh.sh` —
+встановіть [Termux:Widget](https://f-droid.org/packages/com.termux.widget/),
+довге натискання на робочому столі → додати віджет Termux:Widget → обрати
+**webssh**: він запустить демон, дочекається URL з токеном і відкриє його
+так само.
+
+Той самий однорядковий встановлювач перезбирає webssh під найновіший реліз
+при повторному запуску; прибрати все — `... | bash -s -- --uninstall` (дані
+в `~/.local/share/webssh` залишаються, як і в десктопному деінсталяторі).
+
 ## Збірка та запуск
 
 Потрібно: Go ≥ 1.25, Node ≥ 20, `rsvg-convert` (пакет `librsvg2-bin`, потрібен
@@ -272,18 +317,25 @@ cd tai
 
 ```sh
 make dist              # один архів під архітектуру цієї машини
+make dist-termux-src   # архів вихідного коду, з якого збирає packaging/termux/install.sh
 make dist-windows      # webssh-setup.exe з версією в імені
-make dist-all          # amd64 + arm64 + webssh-setup.exe + SHA256SUMS на все
+make dist-all          # amd64 + arm64 + termux-src + webssh-setup.exe + SHA256SUMS на все
 ```
 
 Кожен Linux-архів — це `dist/webssh-<тег>-linux-<арх>.tar.gz`, усередині
 бінарник, іконки, шаблон `.desktop` і сам `get.sh` — завдяки останньому архів
 ставиться без мережі; `dist-windows` натомість робить один файл,
 `dist/webssh-setup-<тег>.exe` (`webssh-launcher.exe`/`webssh-uninstall.exe`
-вбудовані всередину, окремо не публікуються). Випустити реліз означає:
-поставити тег, виконати `make dist-all` на чистій копії цього тегу і додати
-кожен архів, `.exe` **та** `SHA256SUMS` — без файлу контрольних сум `get.sh`
-встановлювати відмовиться.
+вбудовані всередину, окремо не публікуються). `dist-termux-src` робить
+`dist/webssh-<тег>-termux-src.tar.gz` — жоден готовий бінарник не
+запускається під bionic-лінкером Termux (див.
+[Android](#android-через-termux) вище), тож тут лежать `cmd/`, `internal/` і
+`web/` (з уже зібраним `web/dist`, щоб Node у Termux був не потрібен) —
+`packaging/termux/install.sh` збирає з них просто на пристрої. Випустити
+реліз означає: поставити тег, виконати `make dist-all` на чистій копії цього
+тегу і додати кожен архів, `.exe` **та** `SHA256SUMS` — без файлу
+контрольних сум ні `get.sh`, ні `packaging/termux/install.sh` встановлювати
+відмовляться.
 
 ## Іконки
 
@@ -324,7 +376,9 @@ make build-windows-uninstall  # webssh-uninstall.exe окремо
   помічників вище).
 - `web/` — SPA на Svelte + Vite, вбудована в бінарник через `web/embed.go`.
 - `assets/` — головний `icon.svg` і скрипт, що рендерить усі растрові розміри.
-- `packaging/` — шаблон `.desktop` для `make install-desktop` і `get.sh`.
+- `packaging/` — шаблон `.desktop` для `make install-desktop` і `get.sh`;
+  `packaging/termux/` — встановлювач під Android (`install.sh`, збирає на
+  пристрої) і ярлик Termux:Widget для запуску в один тап (`webssh.sh`).
 - `get.sh` — однорядковий встановлювач готового релізу (він же прибирає його).
 - `get.ps1` — встановлювач для Windows: ставить WSL і дистрибутив, потім
   запускає в ньому `get.sh`.

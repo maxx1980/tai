@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"strings"
 
+	"webssh/internal/config"
 	"webssh/internal/launcher"
 )
 
@@ -42,13 +43,25 @@ func OpenURL(browserCmd, rawURL string) error {
 	}
 
 	if name == "" {
-		switch runtime.GOOS {
-		case "darwin":
+		switch {
+		case runtime.GOOS == "darwin":
 			name = "open"
-		case "windows":
+		case runtime.GOOS == "windows":
 			name, args = "rundll32", []string{"url.dll,FileProtocolHandler"}
+		case config.RunningUnderTermux():
+			// No xdg-open, no browser window to speak of — termux-open-url
+			// (from the optional termux-api package) hands the URL to
+			// Android's default handler. Without it, there is nothing to
+			// exec: the token URL is already printed to the terminal, which
+			// is tap-to-open there, so leave name empty and skip Start().
+			if p, err := exec.LookPath("termux-open-url"); err == nil {
+				name = p
+			}
 		default:
 			name = "xdg-open"
+		}
+		if name == "" {
+			return nil
 		}
 		args = append(args, rawURL)
 	}

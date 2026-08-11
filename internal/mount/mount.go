@@ -42,6 +42,9 @@ func Mount(baseDir string, h store.Host, password string) (string, error) {
 	if isMounted(point) {
 		return point, nil
 	}
+	if _, err := exec.LookPath("sshfs"); err != nil {
+		return "", errors.New("sshfs is not available on this platform")
+	}
 	if err := os.MkdirAll(point, 0o700); err != nil {
 		return "", err
 	}
