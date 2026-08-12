@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Builds webssh, asks how its interface should open, and registers it in the
-# Linux application menu.
+# Builds webssh, asks how its interface should open, and registers it — the
+# Linux application menu, or a webssh.app bundle in ~/Applications on macOS.
 #
 #   ./install.sh                       ask interactively (default)
 #   ./install.sh --ui app              pick the mode up front, no questions
@@ -15,7 +15,14 @@ set -euo pipefail
 
 cd "$(dirname -- "${BASH_SOURCE[0]}")"
 
-# webview_go pins gtk+-3.0 + webkit2gtk-4.0 in its cgo pkg-config line.
+case "$(uname -s)" in
+Linux) os_name=linux ;;
+Darwin) os_name=darwin ;;
+*) os_name=other ;;
+esac
+
+# webview_go pins gtk+-3.0 + webkit2gtk-4.0 in its cgo pkg-config line — a
+# Linux-only build path; macOS has no equivalent offered by this installer.
 WEBVIEW_PKGS="libgtk-3-dev libwebkit2gtk-4.0-dev"
 
 run_after=0
@@ -99,7 +106,12 @@ find_chromium_all() {
 		echo "$c"
 	done
 	for c in /opt/google/chrome/google-chrome /opt/microsoft/msedge/microsoft-edge \
-		/opt/brave.com/brave/brave-browser /opt/vivaldi/vivaldi; do
+		/opt/brave.com/brave/brave-browser /opt/vivaldi/vivaldi \
+		"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+		"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge" \
+		"/Applications/Brave Browser.app/Contents/MacOS/Brave Browser" \
+		"/Applications/Vivaldi.app/Contents/MacOS/Vivaldi" \
+		"/Applications/Chromium.app/Contents/MacOS/Chromium"; do
 		[[ -x $c ]] || continue
 		real=$(readlink -f "$c" 2>/dev/null || echo "$c")
 		[[ -n ${seen[$real]:-} ]] && continue
@@ -127,6 +139,8 @@ print_menu() {
 	fi
 	if ((webkit_ready)); then
 		echo "  3) Native webview    built into the binary, no browser at all"
+	elif [[ $os_name == darwin ]]; then
+		echo "  3) Native webview    not offered on macOS by this installer (Linux/GTK only)"
 	else
 		echo "  3) Native webview    needs: sudo apt install $WEBVIEW_PKGS"
 	fi
@@ -224,6 +238,10 @@ if [[ $mode == app && -z $app_browser ]]; then
 fi
 
 # --- webview needs its headers before anything can be built -----------------
+if [[ $mode == webview && $os_name == darwin ]]; then
+	echo "install.sh: --ui webview is Linux/GTK only, not offered on macOS" >&2
+	exit 1
+fi
 if [[ $mode == webview ]] && ((!webkit_ready)); then
 	echo
 	echo "The webview build needs: $WEBVIEW_PKGS"
@@ -260,8 +278,13 @@ else
 	make build
 fi
 
-echo "==> installing desktop entry and icons"
-make install-desktop
+if [[ $os_name == darwin ]]; then
+	echo "==> installing webssh.app and icons"
+	make install-app-macos
+else
+	echo "==> installing desktop entry and icons"
+	make install-desktop
+fi
 
 # Recorded in the database — the same place the Settings panel writes it, so
 # the launcher and the UI can never disagree.
@@ -278,7 +301,21 @@ app) how="an app window via ${app_browser/#auto/a browser detected at startup}" 
 webview) how="a native webview window" ;;
 esac
 
-cat <<EOF
+if [[ $os_name == darwin ]]; then
+	cat <<EOF
+
+webssh is installed.
+  binary   $PWD/webssh
+  app      $HOME/Applications/webssh.app
+  opens as $how
+
+It should now show up in Launchpad and Spotlight, and can be pinned to the
+Dock like any other app. The mode and the browser can be changed later in
+Settings, or per run with '--ui browser|app'. Remove everything again with
+'./uninstall.sh'.
+EOF
+else
+	cat <<EOF
 
 webssh is installed.
   binary   $PWD/webssh
@@ -290,6 +327,7 @@ re-login before a newly added launcher appears. The mode and the browser
 can be changed later in Settings, or per run with
 '--ui browser|app|webview'. Remove everything again with './uninstall.sh'.
 EOF
+fi
 
 if ((run_after)); then
 	echo

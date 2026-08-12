@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Installs a prebuilt webssh from GitHub releases. On Linux it also registers
-# it in the application menu; macOS has no equivalent yet, so it installs the
-# binary and icons only — run it from a shell. Everything lands under $HOME —
-# no root, no system paths. Run it with --help for the options; see usage()
-# below for the same text.
+# Installs a prebuilt webssh from GitHub releases. On Linux it registers it in
+# the application menu; on macOS it assembles a webssh.app bundle in
+# ~/Applications, so it shows up in Launchpad/Spotlight/Dock too. Everything
+# lands under $HOME — no root, no system paths. Run it with --help for the
+# options; see usage() below for the same text.
 #
 # This script is normally piped into bash, which means it has no file behind it:
 # ${BASH_SOURCE[0]} is unset, so nothing here may read the script itself.
@@ -34,8 +34,8 @@ die() {
 
 usage() {
 	cat <<EOF
-Installs a prebuilt webssh. On Linux it also registers it in the application
-menu; on macOS (experimental) it installs the binary and icons only.
+Installs a prebuilt webssh. On Linux it registers it in the application menu;
+on macOS it builds a webssh.app bundle in ~/Applications (Launchpad/Dock).
 
   curl -fsSL https://raw.githubusercontent.com/$REPO/main/get.sh | bash
 
@@ -86,6 +86,10 @@ bindir=$prefix/bin
 icondir=$data_home/icons/hicolor
 appdir=$data_home/applications
 desktop=$appdir/$BINARY.desktop
+# macOS .app bundle — a real Finder/Launchpad/Spotlight location, not tied to
+# --prefix (that one only affects where the bare binary goes).
+app_bundle=$HOME/Applications/$BINARY.app
+lsregister=/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister
 
 case "$(uname -s)" in
 Linux) os_name=linux ;;
@@ -124,6 +128,11 @@ if ((do_uninstall)); then
 		gtk-update-icon-cache -f -t "$icondir" >/dev/null 2>&1 || true
 	command -v update-desktop-database >/dev/null 2>&1 &&
 		update-desktop-database "$appdir" >/dev/null 2>&1 || true
+
+	if [[ $os_name == darwin && -d $app_bundle ]]; then
+		[[ -x $lsregister ]] && "$lsregister" -u "$app_bundle" >/dev/null 2>&1 || true
+		rm -rf "$app_bundle"
+	fi
 
 	echo "webssh removed."
 	echo "Your data is still in $data_home/$BINARY (inventory, keys, API key)."
@@ -263,6 +272,25 @@ if [[ $os_name == linux ]]; then
 		update-desktop-database "$appdir" >/dev/null 2>&1 || true
 fi
 
+# A release built before this bundle existed ships none of these three, so an
+# older/pinned --version or an offline --from dir degrades to a plain binary
+# instead of failing — same spirit as the "-" prefixes above ignoring missing
+# gtk tools.
+app_bundle_built=0
+if [[ $os_name == darwin && -f $src/Info.plist.in && -f $src/macos-launcher.sh.in && -x $src/make-icns.sh ]]; then
+	echo "==> building webssh.app"
+	rm -rf "$app_bundle"
+	mkdir -p "$app_bundle/Contents/MacOS" "$app_bundle/Contents/Resources"
+	sed "s|@EXEC@|$bindir/$BINARY|" "$src/macos-launcher.sh.in" >"$app_bundle/Contents/MacOS/$BINARY"
+	chmod 755 "$app_bundle/Contents/MacOS/$BINARY"
+	ver=$("$bindir/$BINARY" --version | awk '{print $2}')
+	sed "s|@VERSION@|$ver|" "$src/Info.plist.in" >"$app_bundle/Contents/Info.plist"
+	"$src/make-icns.sh" "$src/icons/$BINARY" "$app_bundle/Contents/Resources/$BINARY.icns" ||
+		echo "==> icns generation failed; webssh.app has no icon" >&2
+	[[ -x $lsregister ]] && "$lsregister" -f "$app_bundle" >/dev/null 2>&1 || true
+	app_bundle_built=1
+fi
+
 # --- how the interface opens ------------------------------------------------
 # Recorded in the database, the same place the Settings panel writes it, so the
 # launcher and the UI can never disagree. A pipe has no terminal to ask on, so
@@ -316,6 +344,7 @@ echo
 echo "${installed} is installed."
 echo "  binary   $bindir/$BINARY"
 [[ $os_name == linux ]] && echo "  launcher $desktop"
+[[ $os_name == darwin && $app_bundle_built == 1 ]] && echo "  app      $app_bundle"
 echo "  icons    $icondir/<size>/apps/$BINARY.png"
 echo "  data     $data_home/$BINARY"
 echo "  opens as $how"
@@ -329,15 +358,24 @@ per run with '--ui browser|app'. Remove everything again with:
 
   curl -fsSL https://raw.githubusercontent.com/$REPO/main/get.sh | bash -s -- --uninstall
 EOF
+elif ((app_bundle_built)); then
+	cat <<EOF
+It should now show up in Launchpad and Spotlight, and can be pinned to the
+Dock like any other app. The mode can be changed in Settings, or per run with
+'--ui browser|app'. Remove everything again with:
+
+  curl -fsSL https://raw.githubusercontent.com/$REPO/main/get.sh | bash -s -- --uninstall
+EOF
 else
 	cat <<EOF
-macOS has no application-menu integration yet (experimental support) — run it
-from a shell:
+This release predates the webssh.app bundle, so there is no Launchpad/Dock
+integration yet — run it from a shell:
 
   $bindir/$BINARY
 
-The mode can be changed in Settings, or per run with '--ui browser|app'.
-Remove everything again with:
+Re-run this installer once a newer release is published to get the app
+bundle. The mode can be changed in Settings, or per run with
+'--ui browser|app'. Remove everything again with:
 
   curl -fsSL https://raw.githubusercontent.com/$REPO/main/get.sh | bash -s -- --uninstall
 EOF

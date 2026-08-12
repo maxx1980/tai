@@ -103,10 +103,12 @@ Options go after `-s --`, because the script is being piped into bash:
 ... | bash -s -- --uninstall         # remove binary, icons and launcher
 ```
 
-Linux x86-64 and arm64, and macOS (Intel and Apple Silicon) as **experimental**
-support: it builds and runs, but has no application-menu integration yet — the
-installer just places the binary and icons and prints the command to run it.
-sshfs mounting needs [macFUSE](https://osxfuse.github.io/) installed separately
+Linux x86-64 and arm64, and macOS (Intel and Apple Silicon). On Linux it
+registers webssh in the application menu; on macOS it assembles a
+`webssh.app` bundle in `~/Applications` (icon included) and registers it with
+Launch Services, so it shows up in Launchpad and Spotlight and can be pinned
+to the Dock, same as the Linux launcher. sshfs mounting needs
+[macFUSE](https://osxfuse.github.io/) installed separately
 (`brew install macfuse sshfs`); everything else, including the web SFTP
 browser, needs nothing extra. The release binary is static (`CGO_ENABLED=0`),
 so on Linux it does not care about your libc, and it covers the `browser` and
@@ -176,9 +178,10 @@ The webview build additionally needs GTK and WebKit headers
 why it is opt-in — it turns on cgo, whereas the default build is pure Go and
 cross-compiles to Windows unchanged.
 
-## Install from source (Linux desktop)
+## Install from source (Linux and macOS desktop)
 
-`install.sh` builds everything and registers webssh in the application menu:
+`install.sh` builds everything and registers webssh — the application menu on
+Linux, a `webssh.app` bundle in `~/Applications` on macOS:
 
 ```sh
 git clone https://github.com/maxx1980/tai
@@ -189,21 +192,25 @@ cd tai
 ```
 
 It asks which of the three modes above to use, marking any that this machine
-cannot provide, and records the answer where the Settings panel reads it.
+cannot provide (macOS never offers `webview`, that mode is Linux/GTK-only),
+and records the answer where the Settings panel reads it.
 
 It installs into your home directory only — no root, no system paths:
 
-- icons → `~/.local/share/icons/hicolor/<size>/apps/webssh.png` (+ `scalable/…svg`);
-- launcher → `~/.local/share/applications/webssh.desktop`, with `Exec` pointing at
-  the binary in this checkout, so don't move the directory afterwards.
+- Linux: icons → `~/.local/share/icons/hicolor/<size>/apps/webssh.png`
+  (+ `scalable/…svg`); launcher → `~/.local/share/applications/webssh.desktop`.
+- macOS: `~/Applications/webssh.app`, icon included, registered with Launch
+  Services (`lsregister`) so it shows up in Launchpad/Spotlight right away.
 
-The same steps are available as `make install-desktop`. Some desktops only pick
-up a new launcher after a re-login.
+Either way `Exec`/the bundle's launcher point at the binary in this checkout,
+so don't move the directory afterwards. The same steps are available as
+`make install-desktop` (Linux) / `make install-app-macos` (macOS). Some Linux
+desktops only pick up a new launcher after a re-login.
 
 To remove it again:
 
 ```sh
-./uninstall.sh          # stop the daemon, unmount sshfs, drop launcher + binary
+./uninstall.sh          # stop the daemon, unmount sshfs, drop launcher/app + binary
 ./uninstall.sh --purge  # ...and delete the database, keys and ~/.ssh integration
 ```
 
@@ -211,7 +218,8 @@ The plain form keeps everything you own, so reinstalling resumes where you left
 off. `--purge` asks before deleting and backs up `~/.ssh/config` before dropping
 the `Include` line. Unmounting comes first on purpose — deleting a directory
 while an sshfs mount is live would delete files on the remote host. If you only
-want the launcher gone, `make uninstall-desktop` still does just that.
+want the launcher/app bundle gone, `make uninstall-desktop` /
+`make uninstall-app-macos` still does just that.
 
 (`uninstall.sh` drives `make`, so it is for source installs. A prebuilt one is
 removed with `get.sh --uninstall`.)
@@ -255,12 +263,13 @@ commands are Linux ones, so it does not run there yet.
   `backup`.
 - `web/` — Svelte + Vite SPA, embedded into the binary via `web/embed.go`.
 - `assets/` — master `icon.svg` and the script that renders every raster size.
-- `packaging/` — `.desktop` template used by `make install-desktop` and `get.sh`.
+- `packaging/` — `.desktop` template (Linux) and `Info.plist.in` /
+  `macos-launcher.sh.in` / `make-icns.sh` (macOS `.app` bundle), used by
+  `make install-desktop` / `make install-app-macos` and `get.sh`.
 - `get.sh` — the one-line installer for a prebuilt release (also removes it).
 - `winres/` — resource manifest for the Windows icon and version info.
 
 ## Roadmap
 
 Port forwarding (local/remote/SOCKS) with a tunnel monitor, broadcast commands,
-command palette, Ansible/PuTTY import, a real macOS `.app` bundle with Dock/menu
-integration (today's macOS support is a plain binary launched from a shell).
+command palette, Ansible/PuTTY import.
