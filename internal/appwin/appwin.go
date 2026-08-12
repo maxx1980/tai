@@ -57,7 +57,9 @@ type UI interface {
 	Open(url string) error
 	// Blocking reports whether Open owns the calling (main) goroutine.
 	Blocking() bool
-	// Close asks a blocking UI to tear down. No-op for the others.
+	// Close tears down whatever Open started: closes a blocking UI's window,
+	// or terminates a chromium app window's process. No-op for a plain
+	// browser tab, which owns no process of its own.
 	Close()
 	// Mode reports the implementation actually selected after fallbacks. The
 	// launcher uses it to detect an app window that never connected and retry in

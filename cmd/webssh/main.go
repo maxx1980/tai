@@ -218,6 +218,10 @@ func run(addr string, noOpen bool, uiFlag string) error {
 				log.Printf("could not open the interface (%v); open the URL above manually", err)
 			}
 			waitForStop()
+			// A chromium app window is a process of its own (see chromiumUI in
+			// internal/appwin) that outlives the daemon on macOS unless told to
+			// exit; a no-op for the plain-browser UI, which owns no process.
+			win.Close()
 		}
 	}
 

@@ -148,10 +148,10 @@ func findChromium(pinned string) (string, bool) {
 type chromiumUI struct {
 	exe        string
 	profileDir string
+	proc       *os.Process // the instance Open launched, if any
 }
 
 func (c *chromiumUI) Blocking() bool { return false }
-func (c *chromiumUI) Close()         {}
 func (c *chromiumUI) Mode() Mode     { return ModeApp }
 
 func (c *chromiumUI) Open(rawURL string) error {
@@ -169,7 +169,97 @@ func (c *chromiumUI) Open(rawURL string) error {
 		"--no-first-run",
 		"--no-default-browser-check",
 	}
-	return exec.Command(c.exe, args...).Start()
+	cmd := exec.Command(c.exe, args...)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	c.proc = cmd.Process
+	return nil
+}
+
+// Close terminates the chromium instance this UI launched, if it is still
+// running. The daemon calls this on every shutdown path, not just closing the
+// window: without it, the process this Open call started outlives the daemon
+// indefinitely on macOS (see killStaleProfileHolder), which contradicts the
+// "quits with the browser... does not linger in the background" promise —
+// the browser instance kept lingering even though the daemon itself had
+// already exited on schedule.
+func (c *chromiumUI) Close() {
+	if c.proc == nil {
+		return
+	}
+	terminate(c.proc)
+}
+
+// terminate asks proc to exit via SIGTERM, falling back to Kill (the only
+// signal Go supports on every OS) on platforms where SIGTERM is not
+// implemented (Windows) or the process ignores it.
+func terminate(proc *os.Process) {
+	if proc.Signal(syscall.SIGTERM) != nil {
+		_ = proc.Kill()
+		return
+	}
+	done := make(chan struct{})
+	go func() { _, _ = proc.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		_ = proc.Kill()
+	}
+}
+
+// killStaleProfileHolder terminates whatever process still holds profileDir's
+// Chromium SingletonLock, if any.
+//
+// Closing the last window of an --app instance quits the chromium process on
+// Linux, so the profile is free by the time webssh is launched again. macOS
+// follows normal app-lifecycle rules instead: the process lingers with no
+// window after Cmd+W/the close button. A later launch against the same
+// --user-data-dir then finds the lock already held, and chromium's own
+// process-singleton behaviour forwards the new --app=URL to that background
+// instance as an ordinary tab rather than starting a fresh chromeless window —
+// which is what "relaunching opens an empty/wrong Chrome window" turned out
+// to be, confirmed live: the forwarded tab connects to the daemon fine (so
+// the app-window-didn't-connect fallback below never fires either), it just
+// never gets the --app treatment. profileDir is a browser profile webssh
+// creates and uses exclusively for this window, never the user's real Chrome
+// profile, so killing whatever holds its lock is always safe.
+func killStaleProfileHolder(profileDir string) {
+	lock := filepath.Join(profileDir, "SingletonLock")
+	target, err := os.Readlink(lock)
+	if err != nil {
+		return
+	}
+	// The symlink target is "<hostname>-<pid>"; the hostname itself may
+	// contain hyphens, so split on the last one.
+	i := strings.LastIndexByte(target, '-')
+	if i < 0 {
+		return
+	}
+	pid, err := strconv.Atoi(target[i+1:])
+	if err != nil {
+		return
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return
+	}
+	// SIGTERM lets chromium run its own shutdown, which is what actually
+	// removes the lock; Kill (the only signal Go supports on every OS) covers
+	// platforms where SIGTERM is not implemented (Windows).
+	if proc.Signal(syscall.SIGTERM) != nil {
+		_ = proc.Kill()
+	}
+	for i := 0; i < 40; i++ {
+		if _, err := os.Lstat(lock); os.IsNotExist(err) {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	// Still there after 2s (a hung process, or Kill's cleanup never ran) — a
+	// stale lock left behind blocks every future launch, so drop it directly;
+	// it is only ever a symlink webssh's own chromium instances create.
+	_ = os.Remove(lock)
 }
 
 // killStaleProfileHolder terminates whatever process still holds profileDir's
