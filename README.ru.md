@@ -114,9 +114,15 @@ curl -fsSL https://raw.githubusercontent.com/maxx1980/tai/main/get.sh | bash
 ... | bash -s -- --uninstall         # удалить бинарник, иконки и пункт меню
 ```
 
-Linux x86-64 и arm64. Релизный бинарник статический (`CGO_ENABLED=0`), поэтому
-ему безразличен ваш libc, и он поддерживает режимы `browser` и `app`; родное
-окно `webview` требует cgo и webkit при сборке и доступно только из исходников.
+Linux x86-64 и arm64, а также macOS (Intel и Apple Silicon) в статусе
+**эксперимента**: собирается и работает, но пункта в меню приложений пока нет —
+установщик просто кладёт бинарник и иконки и печатает команду для запуска.
+Монтирование через sshfs требует отдельно поставленного
+[macFUSE](https://osxfuse.github.io/) (`brew install macfuse sshfs`); всё
+остальное, включая веб-обозреватель SFTP, не требует ничего дополнительного.
+Релизный бинарник статический (`CGO_ENABLED=0`), поэтому на Linux ему
+безразличен ваш libc, и он поддерживает режимы `browser` и `app`; родное окно
+`webview` требует cgo и webkit при сборке и доступно только из исходников.
 
 Под Windows нативной сборки, которая реально работает, пока нет — в
 `internal/pty` нет рабочего ConPTY-бэкенда, поэтому веб-терминал не может
@@ -216,8 +222,10 @@ webssh по умолчанию включает на каждой карточк
 
 ## Сборка и запуск
 
-Требуется: Go ≥ 1.25, Node ≥ 20, `rsvg-convert` (пакет `librsvg2-bin`, нужен для
-рендеринга иконок) и `sshfs` / `ssh-keygen` в `PATH`.
+Требуется: Go ≥ 1.25, Node ≥ 20, `rsvg-convert` (пакет `librsvg2-bin` на Linux,
+`brew install librsvg` на macOS, нужен для рендеринга иконок) и `sshfs` /
+`ssh-keygen` в `PATH` (на macOS: `brew install macfuse sshfs`, `ssh-keygen` уже
+входит в систему).
 
 ```sh
 git clone https://github.com/maxx1980/tai

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Installs a prebuilt webssh from GitHub releases and registers it in the Linux
-# application menu. Everything lands under $HOME — no root, no system paths.
-# Run it with --help for the options; see usage() below for the same text.
+# Installs a prebuilt webssh from GitHub releases. On Linux it registers it in
+# the application menu; on macOS it assembles a webssh.app bundle in
+# ~/Applications, so it shows up in Launchpad/Spotlight/Dock too. Everything
+# lands under $HOME — no root, no system paths. Run it with --help for the
+# options; see usage() below for the same text.
 #
 # This script is normally piped into bash, which means it has no file behind it:
 # ${BASH_SOURCE[0]} is unset, so nothing here may read the script itself.
@@ -32,7 +34,8 @@ die() {
 
 usage() {
 	cat <<EOF
-Installs a prebuilt webssh and registers it in the Linux application menu.
+Installs a prebuilt webssh. On Linux it registers it in the application menu;
+on macOS it builds a webssh.app bundle in ~/Applications (Launchpad/Dock).
 
   curl -fsSL https://raw.githubusercontent.com/$REPO/main/get.sh | bash
 
@@ -83,6 +86,27 @@ bindir=$prefix/bin
 icondir=$data_home/icons/hicolor
 appdir=$data_home/applications
 desktop=$appdir/$BINARY.desktop
+# macOS .app bundle — a real Finder/Launchpad/Spotlight location, not tied to
+# --prefix (that one only affects where the bare binary goes).
+app_bundle=$HOME/Applications/$BINARY.app
+lsregister=/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister
+
+case "$(uname -s)" in
+Linux) os_name=linux ;;
+Darwin) os_name=darwin ;;
+*) die "no prebuilt binary for $(uname -s) — build from source (see the README)" ;;
+esac
+
+# exe_of_pid resolves the path of a running process's executable. Linux has
+# /proc; macOS does not, so `ps -o comm=` stands in — it prints the absolute
+# path there, unlike Linux's ps.
+exe_of_pid() {
+	if [[ $os_name == linux ]]; then
+		readlink "/proc/$1/exe" 2>/dev/null
+	else
+		ps -p "$1" -o comm= 2>/dev/null
+	fi
+}
 
 # --- removal ----------------------------------------------------------------
 # Kept here rather than in uninstall.sh: that one drives `make`, which a
@@ -90,7 +114,7 @@ desktop=$appdir/$BINARY.desktop
 if ((do_uninstall)); then
 	# Match on the executable, so someone else's "webssh" is never touched.
 	for pid in $(pgrep -x "$BINARY" 2>/dev/null || true); do
-		exe=$(readlink "/proc/$pid/exe" 2>/dev/null || true)
+		exe=$(exe_of_pid "$pid")
 		[[ ${exe%% (deleted)} == "$bindir/$BINARY" ]] || continue
 		echo "==> stopping webssh (pid $pid)"
 		kill "$pid" 2>/dev/null || true
@@ -105,6 +129,11 @@ if ((do_uninstall)); then
 	command -v update-desktop-database >/dev/null 2>&1 &&
 		update-desktop-database "$appdir" >/dev/null 2>&1 || true
 
+	if [[ $os_name == darwin && -d $app_bundle ]]; then
+		[[ -x $lsregister ]] && "$lsregister" -u "$app_bundle" >/dev/null 2>&1 || true
+		rm -rf "$app_bundle"
+	fi
+
 	echo "webssh removed."
 	echo "Your data is still in $data_home/$BINARY (inventory, keys, API key)."
 	echo "Delete it with: rm -rf $data_home/$BINARY"
@@ -117,14 +146,13 @@ fi
 # GOOS=linux is non-PIE, and even a PIE rebuild fails bionic's TLS-segment
 # alignment check on modern Android. The only binary that runs there is one
 # built with GOOS=android CGO_ENABLED=1, which packaging/termux/install.sh
-# builds on-device with Termux's own Go toolchain.
+# builds on-device with Termux's own Go toolchain. (macOS never hits this —
+# the os_name case above already sent anything but Linux/Darwin to die().)
 if [[ -n ${TERMUX_VERSION:-} || ${PREFIX:-} == *com.termux* ]]; then
 	die "on Termux, use the Termux installer instead — it builds on-device \
 (no release binary runs under Termux's bionic linker):
   curl -fsSL https://raw.githubusercontent.com/$REPO/main/packaging/termux/install.sh | bash"
 fi
-
-[[ $(uname -s) == Linux ]] || die "this installer is for Linux (found $(uname -s))"
 
 case "$(uname -m)" in
 x86_64 | amd64) arch=amd64 ;;
@@ -135,8 +163,9 @@ esac
 case "${mode:-}" in
 "" | browser | app) ;;
 webview)
-	die "the prebuilt binary has no webview: it needs cgo and libwebkit2gtk, so it
-       is built from source only. Clone the repo and run './install.sh --ui webview'."
+	die "the prebuilt binary has no webview: it needs cgo and native GUI
+       libraries, so it is built from source only — see the README's Build
+       section ('./install.sh --ui webview' or 'make build-webview')."
 	;;
 *) die "--ui must be browser or app (got '$mode')" ;;
 esac
@@ -175,7 +204,11 @@ if [[ -z $from_dir ]]; then
 fi
 
 tmp=""
-cleanup() { [[ -n $tmp ]] && rm -rf "$tmp"; }
+# The trailing `|| true` matters: an EXIT trap's own exit status overrides the
+# script's under `set -e`, and "$tmp" is empty on the --from / unpacked-archive
+# path (nothing downloaded), so the bare `[[ -n $tmp ]]` would make every such
+# install report failure even though it fully succeeded.
+cleanup() { [[ -n $tmp ]] && rm -rf "$tmp" || true; }
 trap cleanup EXIT
 
 if [[ -n $from_dir ]]; then
@@ -193,7 +226,7 @@ else
 			die "no published release found for $REPO — build from source (see the README)"
 	fi
 
-	name=$BINARY-$version-linux-$arch
+	name=$BINARY-$version-$os_name-$arch
 	base=$DL_BASE/$REPO/releases/download/$version
 	tmp=$(mktemp -d)
 
@@ -231,21 +264,49 @@ mkdir -p "$bindir"
 install -m755 "$src/$BINARY" "$bindir/$BINARY.new"
 mv -f "$bindir/$BINARY.new" "$bindir/$BINARY"
 
-echo "==> installing icons and the launcher"
+echo "==> installing icons"
+# Not install -D: BSD install (macOS) lacks that GNU extension, so the target
+# directory is created explicitly instead.
 for n in $ICON_SIZES; do
-	install -Dm644 "$src/icons/$BINARY-$n.png" "$icondir/${n}x${n}/apps/$BINARY.png"
+	dst="$icondir/${n}x${n}/apps/$BINARY.png"
+	mkdir -p "$(dirname "$dst")"
+	install -m644 "$src/icons/$BINARY-$n.png" "$dst"
 done
-install -Dm644 "$src/icons/$BINARY.svg" "$icondir/scalable/apps/$BINARY.svg"
+dst="$icondir/scalable/apps/$BINARY.svg"
+mkdir -p "$(dirname "$dst")"
+install -m644 "$src/icons/$BINARY.svg" "$dst"
 
-mkdir -p "$appdir"
-# Exec must be an absolute path in a .desktop file.
-sed "s|@EXEC@|$bindir/$BINARY|" "$src/$BINARY.desktop.in" >"$desktop"
-chmod 644 "$desktop"
+if [[ $os_name == linux ]]; then
+	echo "==> registering the application-menu launcher"
+	mkdir -p "$appdir"
+	# Exec must be an absolute path in a .desktop file.
+	sed "s|@EXEC@|$bindir/$BINARY|" "$src/$BINARY.desktop.in" >"$desktop"
+	chmod 644 "$desktop"
 
-command -v gtk-update-icon-cache >/dev/null 2>&1 &&
-	gtk-update-icon-cache -f -t "$icondir" >/dev/null 2>&1 || true
-command -v update-desktop-database >/dev/null 2>&1 &&
-	update-desktop-database "$appdir" >/dev/null 2>&1 || true
+	command -v gtk-update-icon-cache >/dev/null 2>&1 &&
+		gtk-update-icon-cache -f -t "$icondir" >/dev/null 2>&1 || true
+	command -v update-desktop-database >/dev/null 2>&1 &&
+		update-desktop-database "$appdir" >/dev/null 2>&1 || true
+fi
+
+# A release built before this bundle existed ships none of these three, so an
+# older/pinned --version or an offline --from dir degrades to a plain binary
+# instead of failing — same spirit as the "-" prefixes above ignoring missing
+# gtk tools.
+app_bundle_built=0
+if [[ $os_name == darwin && -f $src/Info.plist.in && -f $src/macos-launcher.sh.in && -x $src/make-icns.sh ]]; then
+	echo "==> building webssh.app"
+	rm -rf "$app_bundle"
+	mkdir -p "$app_bundle/Contents/MacOS" "$app_bundle/Contents/Resources"
+	sed "s|@EXEC@|$bindir/$BINARY|" "$src/macos-launcher.sh.in" >"$app_bundle/Contents/MacOS/$BINARY"
+	chmod 755 "$app_bundle/Contents/MacOS/$BINARY"
+	ver=$("$bindir/$BINARY" --version | awk '{print $2}')
+	sed "s|@VERSION@|$ver|" "$src/Info.plist.in" >"$app_bundle/Contents/Info.plist"
+	"$src/make-icns.sh" "$src/icons/$BINARY" "$app_bundle/Contents/Resources/$BINARY.icns" ||
+		echo "==> icns generation failed; webssh.app has no icon" >&2
+	[[ -x $lsregister ]] && "$lsregister" -f "$app_bundle" >/dev/null 2>&1 || true
+	app_bundle_built=1
+fi
 
 # --- how the interface opens ------------------------------------------------
 # Recorded in the database, the same place the Settings panel writes it, so the
@@ -258,7 +319,12 @@ find_chromium() {
 		c=$(command -v "$c" 2>/dev/null) && echo "$c" && return 0
 	done
 	for c in /opt/google/chrome/google-chrome /opt/microsoft/msedge/microsoft-edge \
-		/opt/brave.com/brave/brave-browser /opt/vivaldi/vivaldi; do
+		/opt/brave.com/brave/brave-browser /opt/vivaldi/vivaldi \
+		"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+		"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge" \
+		"/Applications/Brave Browser.app/Contents/MacOS/Brave Browser" \
+		"/Applications/Vivaldi.app/Contents/MacOS/Vivaldi" \
+		"/Applications/Chromium.app/Contents/MacOS/Chromium"; do
 		[[ -x $c ]] && echo "$c" && return 0
 	done
 	return 1
@@ -291,21 +357,46 @@ esac
 
 installed=$("$bindir/$BINARY" --version)
 
-cat <<EOF
+echo
+echo "${installed} is installed."
+echo "  binary   $bindir/$BINARY"
+[[ $os_name == linux ]] && echo "  launcher $desktop"
+[[ $os_name == darwin && $app_bundle_built == 1 ]] && echo "  app      $app_bundle"
+echo "  icons    $icondir/<size>/apps/$BINARY.png"
+echo "  data     $data_home/$BINARY"
+echo "  opens as $how"
+echo
 
-${installed} is installed.
-  binary   $bindir/$BINARY
-  launcher $desktop
-  icons    $icondir/<size>/apps/$BINARY.png
-  data     $data_home/$BINARY
-  opens as $how
-
+if [[ $os_name == linux ]]; then
+	cat <<EOF
 It should now show up in the application menu; some desktops need a re-login
 before a newly added launcher appears. The mode can be changed in Settings, or
 per run with '--ui browser|app'. Remove everything again with:
 
   curl -fsSL https://raw.githubusercontent.com/$REPO/main/get.sh | bash -s -- --uninstall
 EOF
+elif ((app_bundle_built)); then
+	cat <<EOF
+It should now show up in Launchpad and Spotlight, and can be pinned to the
+Dock like any other app. The mode can be changed in Settings, or per run with
+'--ui browser|app'. Remove everything again with:
+
+  curl -fsSL https://raw.githubusercontent.com/$REPO/main/get.sh | bash -s -- --uninstall
+EOF
+else
+	cat <<EOF
+This release predates the webssh.app bundle, so there is no Launchpad/Dock
+integration yet — run it from a shell:
+
+  $bindir/$BINARY
+
+Re-run this installer once a newer release is published to get the app
+bundle. The mode can be changed in Settings, or per run with
+'--ui browser|app'. Remove everything again with:
+
+  curl -fsSL https://raw.githubusercontent.com/$REPO/main/get.sh | bash -s -- --uninstall
+EOF
+fi
 
 case ":$PATH:" in
 *":$bindir:"*) ;;
@@ -323,7 +414,7 @@ esac
 
 # An already-running copy keeps executing the old binary until it is restarted.
 for pid in $(pgrep -x "$BINARY" 2>/dev/null || true); do
-	exe=$(readlink "/proc/$pid/exe" 2>/dev/null || true)
+	exe=$(exe_of_pid "$pid")
 	if [[ ${exe%% (deleted)} == "$bindir/$BINARY" ]]; then
 		echo
 		echo "An older webssh is still running (pid $pid); restart it to pick this one up."

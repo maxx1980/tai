@@ -16,6 +16,7 @@ import (
 	"context"
 	"net"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"sync"
 	"time"
@@ -132,10 +133,18 @@ func (c *Checker) probe(ctx context.Context, h store.Host) State {
 }
 
 // pingOK reports whether host answers a single ICMP echo within ~1s. It shells
-// out to the system ping (Linux flags), mirroring the app's existing habit of
-// exec-ing the ssh binary; if ping is missing it simply reports false.
+// out to the system ping, mirroring the app's existing habit of exec-ing the
+// ssh binary; if ping is missing it simply reports false.
+//
+// -W means two different things depending on the ping: GNU ping (Linux) takes
+// seconds, BSD ping (macOS) takes milliseconds — using the Linux value on
+// Darwin would time out every host after 1ms and mark it red.
 func pingOK(ctx context.Context, host string) bool {
-	cmd := exec.CommandContext(ctx, "ping", "-c", "1", "-W", "1", "-n", host)
+	wait := "1"
+	if runtime.GOOS == "darwin" {
+		wait = "1000"
+	}
+	cmd := exec.CommandContext(ctx, "ping", "-c", "1", "-W", wait, "-n", host)
 	return cmd.Run() == nil
 }
 

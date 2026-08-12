@@ -12,6 +12,11 @@ set -euo pipefail
 cd "$(dirname -- "${BASH_SOURCE[0]}")"
 repo=$PWD
 
+case "$(uname -s)" in
+Darwin) os_name=darwin ;;
+*) os_name=linux ;;
+esac
+
 data_dir=${XDG_DATA_HOME:-$HOME/.local/share}/webssh
 mount_base=${WEBSSH_MOUNT_BASE:-$HOME/mnt/webssh}
 managed_config=$HOME/.ssh/config.d/inventory
@@ -47,10 +52,19 @@ confirm() {
 
 # --- 1. stop the daemon -----------------------------------------------------
 # Match on the executable rather than the name, so an unrelated "webssh" of
-# someone else's is never touched.
+# someone else's is never touched. Linux has /proc; macOS does not, so
+# `ps -o comm=` stands in there (it prints the absolute path, unlike Linux's ps).
+exe_of_pid() {
+	if [[ $os_name == darwin ]]; then
+		ps -p "$1" -o comm= 2>/dev/null
+	else
+		readlink "/proc/$1/exe" 2>/dev/null
+	fi
+}
+
 stopped=0
 for pid in $(pgrep -x webssh 2>/dev/null || true); do
-	exe=$(readlink "/proc/$pid/exe" 2>/dev/null || true)
+	exe=$(exe_of_pid "$pid")
 	[[ ${exe%% (deleted)} == "$repo/webssh" ]] || continue
 	echo "==> stopping webssh (pid $pid)"
 	kill "$pid" 2>/dev/null || true
@@ -72,20 +86,43 @@ unmount_one() {
 		umount "$1" 2>/dev/null
 }
 
+# find_sshfs_mounts lists active mounts under mount_base. Linux reads
+# /proc/mounts directly; macOS has no /proc, so it parses the BSD `mount`
+# command's text output instead (mirrors internal/mount/mount_darwin.go —
+# macFUSE mounts show "macfuse"/"osxfuse" among the parenthesized options).
+find_sshfs_mounts() {
+	if [[ $os_name == darwin ]]; then
+		mount | grep -i fuse | sed -n 's/.* on \(.*\) (.*/\1/p' |
+			grep -F "$mount_base/" || true
+	else
+		awk -v base="$mount_base/" '$3 ~ /^fuse\.sshfs$/ && index($2, base) == 1 {print $2}' /proc/mounts
+	fi
+}
+
 while read -r mp; do
 	[[ -n $mp ]] || continue
 	echo "==> unmounting $mp"
 	unmount_one "$mp" || echo "    failed - unmount it yourself, then re-run" >&2
-done < <(awk -v base="$mount_base/" '$3 ~ /^fuse\.sshfs$/ && index($2, base) == 1 {print $2}' /proc/mounts)
+done < <(find_sshfs_mounts)
 
-if mountpoint -q "$mount_base" 2>/dev/null; then
+if [[ $os_name == darwin ]]; then
+	mount | grep -qF " on $mount_base (" && {
+		echo "==> unmounting $mount_base"
+		unmount_one "$mount_base" || true
+	}
+elif mountpoint -q "$mount_base" 2>/dev/null; then
 	echo "==> unmounting $mount_base"
 	unmount_one "$mount_base" || true
 fi
 
-# --- 3. desktop entry, icons, binary ---------------------------------------
-echo "==> removing launcher and icons"
-make uninstall-desktop >/dev/null
+# --- 3. desktop entry / app bundle, icons, binary ---------------------------
+if [[ $os_name == darwin ]]; then
+	echo "==> removing webssh.app and icons"
+	make uninstall-app-macos >/dev/null
+else
+	echo "==> removing launcher and icons"
+	make uninstall-desktop >/dev/null
+fi
 
 echo "==> removing built binaries"
 rm -f "$repo/webssh" "$repo/webssh.exe"

@@ -1,4 +1,8 @@
 // Package mount manages sshfs mounts of remote home directories.
+//
+// List and Unmount are platform-specific (mount_linux.go, mount_darwin.go):
+// Linux reads /proc/mounts and unmounts via fusermount, macOS parses the BSD
+// `mount` command's text output and unmounts via umount.
 package mount
 
 import (
@@ -37,6 +41,10 @@ var ErrNeedPassword = errors.New("authentication failed — a password or deploy
 // password is optional: when empty, the mount runs non-interactively
 // (BatchMode) using key auth and never prompts on the daemon's console; when
 // set, it is fed to ssh via sshfs's password_stdin so the prompt stays in the web.
+//
+// On macOS this additionally needs macFUSE installed (`brew install
+// macfuse sshfs`) — there is no way to detect that ahead of the call, so a
+// missing macFUSE just surfaces as the sshfs command failing.
 func Mount(baseDir string, h store.Host, password string) (string, error) {
 	point := pointFor(baseDir, h)
 	if isMounted(point) {
@@ -122,42 +130,6 @@ func looksLikeAuthFailure(msg string) bool {
 		strings.Contains(m, "read: connection reset")
 }
 
-// Unmount unmounts the sshfs mount for h.
-func Unmount(baseDir string, h store.Host) error {
-	point := pointFor(baseDir, h)
-	cmd := exec.Command("fusermount", "-u", point)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("fusermount: %v: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
-}
-
-// List returns all active sshfs mounts under baseDir.
-func List(baseDir string) ([]Active, error) {
-	f, err := os.Open("/proc/mounts")
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	var out []Active
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		fields := strings.Fields(sc.Text())
-		if len(fields) < 3 {
-			continue
-		}
-		source, point, fstype := fields[0], unescape(fields[1]), fields[2]
-		if !strings.HasPrefix(fstype, "fuse.sshfs") {
-			continue
-		}
-		if baseDir != "" && !strings.HasPrefix(point, baseDir) {
-			continue
-		}
-		out = append(out, Active{Mountpoint: point, Source: source})
-	}
-	return out, sc.Err()
-}
-
 func isMounted(point string) bool {
 	mounts, err := List("")
 	if err != nil {
@@ -169,24 +141,4 @@ func isMounted(point string) bool {
 		}
 	}
 	return false
-}
-
-// unescape decodes octal escapes (\040 etc.) used in /proc/mounts paths.
-func unescape(s string) string {
-	if !strings.Contains(s, `\`) {
-		return s
-	}
-	var b strings.Builder
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\\' && i+3 < len(s) {
-			var n int
-			if _, err := fmt.Sscanf(s[i+1:i+4], "%o", &n); err == nil {
-				b.WriteByte(byte(n))
-				i += 3
-				continue
-			}
-		}
-		b.WriteByte(s[i])
-	}
-	return b.String()
 }

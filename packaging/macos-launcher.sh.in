@@ -1,0 +1,7 @@
+#!/bin/sh
+# Contents/MacOS/webssh inside the .app bundle. The placeholder below is
+# substituted with the absolute path of the real installed binary at install
+# time (mirrors webssh.desktop.in's Exec= line on Linux), so the bundle itself
+# never carries a copy of the binary and always runs whatever
+# get.sh/install.sh last placed.
+exec "@EXEC@" "$@"
