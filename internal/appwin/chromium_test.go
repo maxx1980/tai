@@ -3,7 +3,9 @@ package appwin
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"webssh/internal/config"
 )
@@ -184,13 +186,51 @@ func TestNewAppModeHonoursPinnedBrowser(t *testing.T) {
 	}
 }
 
-func TestBrowserFallbackHonoursAppBrowser(t *testing.T) {
-	ui := &chromiumUI{exe: "/usr/bin/microsoft-edge"}
-	if got := fallbackBrowserCommand(ui, ""); got != "/usr/bin/microsoft-edge" {
-		t.Fatalf("fallback browser = %q, want pinned Edge", got)
+// Every macOS chromiumPaths entry contains a space ("Google Chrome.app/…"),
+// which is exactly the case that broke: OpenBrowserFallback used to hand the
+// bare exe path to OpenURL, which treats any non-empty browserCmd as a
+// user-authored shell template and splits it on whitespace, so the exec
+// target became "/Applications/Google" and failed outright.
+func TestOpenBrowserFallbackHandlesSpacesInPath(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "marker")
+	exeDir := filepath.Join(dir, "Google Chrome.app", "Contents", "MacOS")
+	if err := os.MkdirAll(exeDir, 0o755); err != nil {
+		t.Fatal(err)
 	}
-	if got := fallbackBrowserCommand(ui, "firefox {{url}}"); got != "firefox {{url}}" {
-		t.Fatalf("fallback browser = %q, want explicit browser_cmd", got)
+	exe := filepath.Join(exeDir, "Google Chrome")
+	script := "#!/bin/sh\nprintf '%s' \"$1\" > " + marker + "\n"
+	if err := os.WriteFile(exe, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	ui := &chromiumUI{exe: exe}
+	const url = "http://example.test/?token=x"
+	if err := OpenBrowserFallback(ui, "", url); err != nil {
+		t.Fatalf("OpenBrowserFallback() error = %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if b, err := os.ReadFile(marker); err == nil {
+			if string(b) != url {
+				t.Fatalf("chromium was run with URL %q, want %q", b, url)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("fallback never ran the chromium binary (marker file missing)")
+}
+
+// An explicit browser_cmd is a real shell template the user typed, so it must
+// still go through OpenURL's {{url}} substitution and quote-aware splitting,
+// not the raw-path exec path used for the chromium fallback above.
+func TestOpenBrowserFallbackHonoursExplicitBrowserCmd(t *testing.T) {
+	ui := &chromiumUI{exe: "/usr/bin/microsoft-edge"}
+	err := OpenBrowserFallback(ui, "definitely-not-a-real-browser-xyz {{url}}", "http://example.test")
+	if err == nil || !strings.Contains(err.Error(), "definitely-not-a-real-browser-xyz") {
+		t.Fatalf("OpenBrowserFallback() error = %v, want it to have attempted the explicit browser_cmd", err)
 	}
 }
 

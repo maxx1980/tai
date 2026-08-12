@@ -6,6 +6,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
 )
 
 // chromiumNames are tried on PATH, most-preferred first.
@@ -151,6 +155,7 @@ func (c *chromiumUI) Close()         {}
 func (c *chromiumUI) Mode() Mode     { return ModeApp }
 
 func (c *chromiumUI) Open(rawURL string) error {
+	killStaleProfileHolder(c.profileDir)
 	args := []string{
 		"--app=" + rawURL,
 		// A private profile is what makes this feel like an application rather
@@ -165,4 +170,58 @@ func (c *chromiumUI) Open(rawURL string) error {
 		"--no-default-browser-check",
 	}
 	return exec.Command(c.exe, args...).Start()
+}
+
+// killStaleProfileHolder terminates whatever process still holds profileDir's
+// Chromium SingletonLock, if any.
+//
+// Closing the last window of an --app instance quits the chromium process on
+// Linux, so the profile is free by the time webssh is launched again. macOS
+// follows normal app-lifecycle rules instead: the process lingers with no
+// window after Cmd+W/the close button. A later launch against the same
+// --user-data-dir then finds the lock already held, and chromium's own
+// process-singleton behaviour forwards the new --app=URL to that background
+// instance as an ordinary tab rather than starting a fresh chromeless window —
+// which is what "relaunching opens an empty/wrong Chrome window" turned out
+// to be, confirmed live: the forwarded tab connects to the daemon fine (so
+// the app-window-didn't-connect fallback below never fires either), it just
+// never gets the --app treatment. profileDir is a browser profile webssh
+// creates and uses exclusively for this window, never the user's real Chrome
+// profile, so killing whatever holds its lock is always safe.
+func killStaleProfileHolder(profileDir string) {
+	lock := filepath.Join(profileDir, "SingletonLock")
+	target, err := os.Readlink(lock)
+	if err != nil {
+		return
+	}
+	// The symlink target is "<hostname>-<pid>"; the hostname itself may
+	// contain hyphens, so split on the last one.
+	i := strings.LastIndexByte(target, '-')
+	if i < 0 {
+		return
+	}
+	pid, err := strconv.Atoi(target[i+1:])
+	if err != nil {
+		return
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return
+	}
+	// SIGTERM lets chromium run its own shutdown, which is what actually
+	// removes the lock; Kill (the only signal Go supports on every OS) covers
+	// platforms where SIGTERM is not implemented (Windows).
+	if proc.Signal(syscall.SIGTERM) != nil {
+		_ = proc.Kill()
+	}
+	for i := 0; i < 40; i++ {
+		if _, err := os.Lstat(lock); os.IsNotExist(err) {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	// Still there after 2s (a hung process, or Kill's cleanup never ran) — a
+	// stale lock left behind blocks every future launch, so drop it directly;
+	// it is only ever a symlink webssh's own chromium instances create.
+	_ = os.Remove(lock)
 }

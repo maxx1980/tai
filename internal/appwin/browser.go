@@ -26,17 +26,18 @@ func (b *browserUI) Open(rawURL string) error { return OpenURL(b.cmd, rawURL) }
 // browser selected for an app window. Falling back through xdg-open here would
 // silently switch, for example, a pinned Edge app to the system-default Chrome.
 func OpenBrowserFallback(ui UI, browserCmd, rawURL string) error {
-	return OpenURL(fallbackBrowserCommand(ui, browserCmd), rawURL)
-}
-
-func fallbackBrowserCommand(ui UI, browserCmd string) string {
-	if browserCmd != "" {
-		return browserCmd
+	// A bare chromium executable path is not a browserCmd template — it is a
+	// literal filesystem path that may itself contain spaces (every macOS
+	// chromiumPaths entry does: "/Applications/Google Chrome.app/…"). Handing
+	// it to OpenURL would run it through SplitFields as if it were a
+	// user-authored shell command and break on the first space, so it is
+	// exec'd directly instead, the same way chromiumUI.Open does.
+	if browserCmd == "" {
+		if chromium, ok := ui.(*chromiumUI); ok {
+			return exec.Command(chromium.exe, rawURL).Start()
+		}
 	}
-	if chromium, ok := ui.(*chromiumUI); ok {
-		return chromium.exe
-	}
-	return ""
+	return OpenURL(browserCmd, rawURL)
 }
 
 // OpenURL hands rawURL to the user's browser command, falling back to the
