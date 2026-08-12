@@ -9,6 +9,9 @@ LDFLAGS := -X webssh/internal/version.Version=$(VERSION)
 # go-winres declares an older go directive, so `go run pkg@ver` would fall back to
 # whatever toolchain is on PATH; pin it to the one this module already builds with.
 WINRES := GOTOOLCHAIN=$(shell go env GOVERSION) go run github.com/tc-hib/go-winres@v0.3.3
+# macOS has no sha256sum (that's GNU coreutils); shasum -a 256 is its BSD/Perl
+# equivalent, which get.sh's own checksum verification already falls back to.
+SHA256SUM := $(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || echo "shasum -a 256")
 ICON_SIZES := 16 24 32 48 64 128 256 512
 DESKTOP_DIR := $(HOME)/.local/share/applications
 ICON_DIR := $(HOME)/.local/share/icons/hicolor
@@ -69,7 +72,7 @@ dist: ui
 	install -m755 get.sh $(DIST_DIR)/$(DIST_NAME)/get.sh
 	tar -czf $(DIST_DIR)/$(DIST_NAME).tar.gz -C $(DIST_DIR) $(DIST_NAME)
 	rm -rf $(DIST_DIR)/$(DIST_NAME)
-	cd $(DIST_DIR) && sha256sum *.tar.gz > SHA256SUMS
+	cd $(DIST_DIR) && $(SHA256SUM) *.tar.gz > SHA256SUMS
 	@echo "==> $(DIST_DIR)/$(DIST_NAME).tar.gz"
 
 # dist-darwin cross-builds a macOS archive — same idea as dist (no cgo, so no
@@ -91,7 +94,7 @@ dist-darwin: ui
 	install -m755 get.sh $(DIST_DIR)/$(BINARY)-$(VERSION)-darwin-$(ARCH)/get.sh
 	tar -czf $(DIST_DIR)/$(BINARY)-$(VERSION)-darwin-$(ARCH).tar.gz -C $(DIST_DIR) $(BINARY)-$(VERSION)-darwin-$(ARCH)
 	rm -rf $(DIST_DIR)/$(BINARY)-$(VERSION)-darwin-$(ARCH)
-	cd $(DIST_DIR) && sha256sum *.tar.gz > SHA256SUMS
+	cd $(DIST_DIR) && $(SHA256SUM) *.tar.gz > SHA256SUMS
 	@echo "==> $(DIST_DIR)/$(BINARY)-$(VERSION)-darwin-$(ARCH).tar.gz"
 
 # dist-all builds every platform/architecture a release publishes. The

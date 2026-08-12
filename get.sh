@@ -191,7 +191,11 @@ if [[ -z $from_dir ]]; then
 fi
 
 tmp=""
-cleanup() { [[ -n $tmp ]] && rm -rf "$tmp"; }
+# The trailing `|| true` matters: an EXIT trap's own exit status overrides the
+# script's under `set -e`, and "$tmp" is empty on the --from / unpacked-archive
+# path (nothing downloaded), so the bare `[[ -n $tmp ]]` would make every such
+# install report failure even though it fully succeeded.
+cleanup() { [[ -n $tmp ]] && rm -rf "$tmp" || true; }
 trap cleanup EXIT
 
 if [[ -n $from_dir ]]; then
