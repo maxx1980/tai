@@ -103,9 +103,17 @@ Options go after `-s --`, because the script is being piped into bash:
 ... | bash -s -- --uninstall         # remove binary, icons and launcher
 ```
 
-Linux x86-64 and arm64. The release binary is static (`CGO_ENABLED=0`), so it
-does not care about your libc, and it covers the `browser` and `app` modes; the
-native `webview` window needs cgo and webkit at build time and is source-only.
+Linux x86-64 and arm64, and macOS (Intel and Apple Silicon). On Linux it
+registers webssh in the application menu; on macOS it assembles a
+`webssh.app` bundle in `~/Applications` (icon included) and registers it with
+Launch Services, so it shows up in Launchpad and Spotlight and can be pinned
+to the Dock, same as the Linux launcher. sshfs mounting needs
+[macFUSE](https://osxfuse.github.io/) installed separately
+(`brew install macfuse sshfs`); everything else, including the web SFTP
+browser, needs nothing extra. The release binary is static (`CGO_ENABLED=0`),
+so on Linux it does not care about your libc, and it covers the `browser` and
+`app` modes; the native `webview` window needs cgo and webkit at build time
+and is source-only.
 
 Windows has no working native build yet — `internal/pty` has no real ConPTY
 backend, so the web terminal cannot start a shell. Until that lands, webssh
@@ -206,8 +214,9 @@ everything with `... | bash -s -- --uninstall` (data under
 
 ## Build & run
 
-Requirements: Go ≥ 1.25, Node ≥ 20, `rsvg-convert` (package `librsvg2-bin`, used to
-render the icons), and `sshfs` / `ssh-keygen` on `PATH`.
+Requirements: Go ≥ 1.25, Node ≥ 20, `rsvg-convert` (package `librsvg2-bin` on Linux,
+`brew install librsvg` on macOS, used to render the icons), and `sshfs` / `ssh-keygen`
+on `PATH` (macOS: `brew install macfuse sshfs`, and `ssh-keygen` ships with the system).
 
 ```sh
 git clone https://github.com/maxx1980/tai
@@ -260,9 +269,10 @@ The webview build additionally needs GTK and WebKit headers
 why it is opt-in — it turns on cgo, whereas the default build is pure Go and
 cross-compiles to Windows unchanged.
 
-## Install from source (Linux desktop)
+## Install from source (Linux and macOS desktop)
 
-`install.sh` builds everything and registers webssh in the application menu:
+`install.sh` builds everything and registers webssh — the application menu on
+Linux, a `webssh.app` bundle in `~/Applications` on macOS:
 
 ```sh
 git clone https://github.com/maxx1980/tai
@@ -273,21 +283,25 @@ cd tai
 ```
 
 It asks which of the three modes above to use, marking any that this machine
-cannot provide, and records the answer where the Settings panel reads it.
+cannot provide (macOS never offers `webview`, that mode is Linux/GTK-only),
+and records the answer where the Settings panel reads it.
 
 It installs into your home directory only — no root, no system paths:
 
-- icons → `~/.local/share/icons/hicolor/<size>/apps/webssh.png` (+ `scalable/…svg`);
-- launcher → `~/.local/share/applications/webssh.desktop`, with `Exec` pointing at
-  the binary in this checkout, so don't move the directory afterwards.
+- Linux: icons → `~/.local/share/icons/hicolor/<size>/apps/webssh.png`
+  (+ `scalable/…svg`); launcher → `~/.local/share/applications/webssh.desktop`.
+- macOS: `~/Applications/webssh.app`, icon included, registered with Launch
+  Services (`lsregister`) so it shows up in Launchpad/Spotlight right away.
 
-The same steps are available as `make install-desktop`. Some desktops only pick
-up a new launcher after a re-login.
+Either way `Exec`/the bundle's launcher point at the binary in this checkout,
+so don't move the directory afterwards. The same steps are available as
+`make install-desktop` (Linux) / `make install-app-macos` (macOS). Some Linux
+desktops only pick up a new launcher after a re-login.
 
 To remove it again:
 
 ```sh
-./uninstall.sh          # stop the daemon, unmount sshfs, drop launcher + binary
+./uninstall.sh          # stop the daemon, unmount sshfs, drop launcher/app + binary
 ./uninstall.sh --purge  # ...and delete the database, keys and ~/.ssh integration
 ```
 
@@ -295,7 +309,8 @@ The plain form keeps everything you own, so reinstalling resumes where you left
 off. `--purge` asks before deleting and backs up `~/.ssh/config` before dropping
 the `Include` line. Unmounting comes first on purpose — deleting a directory
 while an sshfs mount is live would delete files on the remote host. If you only
-want the launcher gone, `make uninstall-desktop` still does just that.
+want the launcher/app bundle gone, `make uninstall-desktop` /
+`make uninstall-app-macos` still does just that.
 
 (`uninstall.sh` drives `make`, so it is for source installs. A prebuilt one is
 removed with `get.sh --uninstall`.)
@@ -303,26 +318,31 @@ removed with `get.sh --uninstall`.)
 ## Releases
 
 ```sh
-make dist              # one archive for this machine's architecture
+make dist              # one Linux archive for this machine's architecture
+make dist-darwin       # one macOS archive for this machine's architecture
 make dist-termux-src   # source tarball packaging/termux/install.sh builds from
 make dist-windows      # webssh-setup.exe, versioned
-make dist-all          # amd64 + arm64 + termux-src + webssh-setup.exe + SHA256SUMS covering all of it
+make dist-all          # amd64 + arm64 for both Linux and macOS, plus
+                        # termux-src + webssh-setup.exe + SHA256SUMS covering all of it
 ```
 
 Each Linux archive is `dist/webssh-<tag>-linux-<arch>.tar.gz` and holds the
 binary, the icons, the `.desktop` template and `get.sh` itself, which is what
-makes it installable offline; `dist-windows` instead produces one file,
-`dist/webssh-setup-<tag>.exe` (`webssh-launcher.exe`/`webssh-uninstall.exe`
-are embedded inside it, not published separately). `dist-termux-src` produces
-`dist/webssh-<tag>-termux-src.tar.gz` — no release *binary* runs under
-Termux's bionic dynamic linker (see [Android](#android-via-termux) above), so
-this ships `cmd/`, `internal/` and `web/` (with `web/dist` already built, so
-Termux never needs Node) for `packaging/termux/install.sh` to compile
-on-device with Termux's own Go toolchain. Publishing a release means
-tagging, running `make dist-all` on a clean checkout of that tag, and
-attaching every archive, the `.exe`, **and** `SHA256SUMS` — `get.sh` and
-`packaging/termux/install.sh` both refuse to install without the checksums
-file.
+makes it installable offline; `dist/webssh-<tag>-darwin-<arch>.tar.gz` is the
+macOS equivalent, swapping the `.desktop` template for `Info.plist.in` /
+`macos-launcher.sh.in` / `make-icns.sh` so `get.sh` can assemble a
+`webssh.app` bundle on the target Mac. `dist-windows` instead produces one
+file, `dist/webssh-setup-<tag>.exe` (`webssh-launcher.exe`/
+`webssh-uninstall.exe` are embedded inside it, not published separately).
+`dist-termux-src` produces `dist/webssh-<tag>-termux-src.tar.gz` — no release
+*binary* runs under Termux's bionic dynamic linker (see
+[Android](#android-via-termux) above), so this ships `cmd/`, `internal/` and
+`web/` (with `web/dist` already built, so Termux never needs Node) for
+`packaging/termux/install.sh` to compile on-device with Termux's own Go
+toolchain. Publishing a release means tagging, running `make dist-all` on a
+clean checkout of that tag, and attaching every archive, the `.exe`, **and**
+`SHA256SUMS` — `get.sh` and `packaging/termux/install.sh` both refuse to
+install without the checksums file.
 
 ## Icons
 
@@ -359,9 +379,11 @@ inside WSL instead, until a real ConPTY backend lands.
   `backup`, `wslutil`/`wininstall` (Windows-only, shared by the three above).
 - `web/` — Svelte + Vite SPA, embedded into the binary via `web/embed.go`.
 - `assets/` — master `icon.svg` and the script that renders every raster size.
-- `packaging/` — `.desktop` template used by `make install-desktop` and
-  `get.sh`; `packaging/termux/` holds the Android installer (`install.sh`,
-  builds on-device) and the Termux:Widget one-tap launcher (`webssh.sh`).
+- `packaging/` — `.desktop` template (Linux) and `Info.plist.in` /
+  `macos-launcher.sh.in` / `make-icns.sh` (macOS `.app` bundle), used by
+  `make install-desktop` / `make install-app-macos` and `get.sh`;
+  `packaging/termux/` holds the Android installer (`install.sh`, builds
+  on-device) and the Termux:Widget one-tap launcher (`webssh.sh`).
 - `get.sh` — the one-line installer for a prebuilt release (also removes it).
 - `get.ps1` — Windows installer: sets up WSL and a distro, then runs `get.sh` in it.
 - `get.bat` — double-click launcher for `get.ps1`, self-elevating via UAC when needed.

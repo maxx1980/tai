@@ -1,4 +1,4 @@
-.PHONY: all ui build build-webview run clean deps dev icons syso build-windows setup-syso build-windows-setup launcher-syso build-windows-launcher uninstall-syso build-windows-uninstall install-desktop uninstall-desktop dist dist-termux-src dist-windows dist-all
+.PHONY: all ui build build-webview run clean deps dev icons syso build-windows setup-syso build-windows-setup launcher-syso build-windows-launcher uninstall-syso build-windows-uninstall install-desktop uninstall-desktop install-app-macos uninstall-app-macos dist dist-darwin dist-termux-src dist-windows dist-all
 
 BINARY := webssh
 # VERSION is stamped into the binary so the updater can compare it with the
@@ -9,9 +9,16 @@ LDFLAGS := -X webssh/internal/version.Version=$(VERSION)
 # go-winres declares an older go directive, so `go run pkg@ver` would fall back to
 # whatever toolchain is on PATH; pin it to the one this module already builds with.
 WINRES := GOTOOLCHAIN=$(shell go env GOVERSION) go run github.com/tc-hib/go-winres@v0.3.3
+# macOS has no sha256sum (that's GNU coreutils); shasum -a 256 is its BSD/Perl
+# equivalent, which get.sh's own checksum verification already falls back to.
+SHA256SUM := $(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || echo "shasum -a 256")
 ICON_SIZES := 16 24 32 48 64 128 256 512
 DESKTOP_DIR := $(HOME)/.local/share/applications
 ICON_DIR := $(HOME)/.local/share/icons/hicolor
+# macOS .app bundle: no root, no system paths, same philosophy as the Linux
+# launcher above. ~/Applications is a real Finder/Launchpad/Spotlight location.
+APP_BUNDLE := $(HOME)/Applications/$(BINARY).app
+LSREGISTER := /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister
 # Release archives. ARCH is overridable so one host can build both of them.
 ARCH ?= $(shell go env GOARCH)
 DIST_DIR := dist
@@ -103,8 +110,30 @@ dist: ui
 	install -m755 get.sh $(DIST_DIR)/$(DIST_NAME)/get.sh
 	tar -czf $(DIST_DIR)/$(DIST_NAME).tar.gz -C $(DIST_DIR) $(DIST_NAME)
 	rm -rf $(DIST_DIR)/$(DIST_NAME)
-	cd $(DIST_DIR) && sha256sum *.tar.gz > SHA256SUMS
+	cd $(DIST_DIR) && $(SHA256SUM) *.tar.gz > SHA256SUMS
 	@echo "==> $(DIST_DIR)/$(DIST_NAME).tar.gz"
+
+# dist-darwin cross-builds a macOS archive — same idea as dist (no cgo, so no
+# webview mode there either). It has no .desktop file (that's a Linux thing),
+# but ships Info.plist.in, macos-launcher.sh.in and make-icns.sh so get.sh can
+# assemble a webssh.app bundle on the target Mac (iconutil only runs there).
+dist-darwin: ui
+	rm -rf $(DIST_DIR)/$(BINARY)-$(VERSION)-darwin-$(ARCH)
+	mkdir -p $(DIST_DIR)/$(BINARY)-$(VERSION)-darwin-$(ARCH)/icons
+	CGO_ENABLED=0 GOOS=darwin GOARCH=$(ARCH) \
+		go build -trimpath -ldflags "-s -w $(LDFLAGS)" -o $(DIST_DIR)/$(BINARY)-$(VERSION)-darwin-$(ARCH)/$(BINARY) ./cmd/webssh
+	for n in $(ICON_SIZES); do \
+		install -m644 assets/png/icon-$$n.png $(DIST_DIR)/$(BINARY)-$(VERSION)-darwin-$(ARCH)/icons/$(BINARY)-$$n.png; \
+	done
+	install -m644 assets/icon.svg $(DIST_DIR)/$(BINARY)-$(VERSION)-darwin-$(ARCH)/icons/$(BINARY).svg
+	install -m644 packaging/Info.plist.in $(DIST_DIR)/$(BINARY)-$(VERSION)-darwin-$(ARCH)/Info.plist.in
+	install -m644 packaging/macos-launcher.sh.in $(DIST_DIR)/$(BINARY)-$(VERSION)-darwin-$(ARCH)/macos-launcher.sh.in
+	install -m755 packaging/make-icns.sh $(DIST_DIR)/$(BINARY)-$(VERSION)-darwin-$(ARCH)/make-icns.sh
+	install -m755 get.sh $(DIST_DIR)/$(BINARY)-$(VERSION)-darwin-$(ARCH)/get.sh
+	tar -czf $(DIST_DIR)/$(BINARY)-$(VERSION)-darwin-$(ARCH).tar.gz -C $(DIST_DIR) $(BINARY)-$(VERSION)-darwin-$(ARCH)
+	rm -rf $(DIST_DIR)/$(BINARY)-$(VERSION)-darwin-$(ARCH)
+	cd $(DIST_DIR) && $(SHA256SUM) *.tar.gz > SHA256SUMS
+	@echo "==> $(DIST_DIR)/$(BINARY)-$(VERSION)-darwin-$(ARCH).tar.gz"
 
 # dist-termux-src packs a source tarball for Termux: cmd/, internal/, web/
 # (with web/dist already built, so Termux never needs Node — only Go), go.mod
@@ -126,7 +155,7 @@ dist-termux-src: ui
 	install -m755 packaging/termux/webssh.sh $(DIST_DIR)/$(DIST_TERMUX_NAME)/packaging/termux/webssh.sh
 	tar -czf $(DIST_DIR)/$(DIST_TERMUX_NAME).tar.gz -C $(DIST_DIR) $(DIST_TERMUX_NAME)
 	rm -rf $(DIST_DIR)/$(DIST_TERMUX_NAME)
-	cd $(DIST_DIR) && sha256sum *.tar.gz > SHA256SUMS
+	cd $(DIST_DIR) && $(SHA256SUM) *.tar.gz > SHA256SUMS
 	@echo "==> $(DIST_DIR)/$(DIST_TERMUX_NAME).tar.gz"
 
 # dist-windows builds webssh-setup.exe (which embeds webssh-launcher.exe and
@@ -138,17 +167,20 @@ dist-termux-src: ui
 dist-windows: build-windows-setup
 	mkdir -p $(DIST_DIR)
 	cp webssh-setup.exe $(DIST_DIR)/$(BINARY)-setup-$(VERSION).exe
-	cd $(DIST_DIR) && sha256sum *.tar.gz *.exe > SHA256SUMS
+	cd $(DIST_DIR) && $(SHA256SUM) *.tar.gz *.exe > SHA256SUMS
 	@echo "==> $(DIST_DIR)/$(BINARY)-setup-$(VERSION).exe"
 
-# dist-all builds every platform a release publishes. The SHA256SUMS the last
-# run writes covers all of them, which is what get.sh verifies against (for
-# the Linux archives; webssh-setup.exe carries its own verification story by
-# virtue of being downloaded straight from a GitHub release URL).
+# dist-all builds every platform/architecture a release publishes. The
+# SHA256SUMS the last run writes covers all of them, which is what get.sh
+# verifies against (for the Linux/macOS archives; webssh-setup.exe carries its
+# own verification story by virtue of being downloaded straight from a GitHub
+# release URL).
 dist-all:
 	rm -rf $(DIST_DIR)
 	$(MAKE) dist ARCH=amd64
 	$(MAKE) dist ARCH=arm64
+	$(MAKE) dist-darwin ARCH=amd64
+	$(MAKE) dist-darwin ARCH=arm64
 	$(MAKE) dist-termux-src
 	$(MAKE) dist-windows
 	@echo
@@ -182,6 +214,24 @@ uninstall-desktop:
 	rm -f $(ICON_DIR)/scalable/apps/$(BINARY).svg
 	-gtk-update-icon-cache -f -t $(ICON_DIR)
 	-update-desktop-database $(DESKTOP_DIR)
+
+# install-app-macos builds a webssh.app bundle wrapping the binary already
+# built in this checkout (Exec is an absolute path, like install-desktop's
+# .desktop above) and registers it with Launch Services, so it shows up in
+# Launchpad/Spotlight/Dock right away instead of waiting for the next scan.
+install-app-macos: icons
+	rm -rf $(APP_BUNDLE)
+	mkdir -p $(APP_BUNDLE)/Contents/MacOS $(APP_BUNDLE)/Contents/Resources
+	sed 's|@EXEC@|$(CURDIR)/$(BINARY)|' packaging/macos-launcher.sh.in \
+		> $(APP_BUNDLE)/Contents/MacOS/$(BINARY)
+	chmod 755 $(APP_BUNDLE)/Contents/MacOS/$(BINARY)
+	sed 's|@VERSION@|$(VERSION)|' packaging/Info.plist.in > $(APP_BUNDLE)/Contents/Info.plist
+	./packaging/make-icns.sh assets/png/icon $(APP_BUNDLE)/Contents/Resources/$(BINARY).icns
+	-$(LSREGISTER) -f $(APP_BUNDLE)
+
+uninstall-app-macos:
+	-$(LSREGISTER) -u $(APP_BUNDLE)
+	rm -rf $(APP_BUNDLE)
 
 clean:
 	rm -f $(BINARY) $(BINARY).exe webssh-setup.exe webssh-launcher.exe webssh-uninstall.exe \
