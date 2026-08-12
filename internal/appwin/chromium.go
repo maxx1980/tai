@@ -148,10 +148,10 @@ func findChromium(pinned string) (string, bool) {
 type chromiumUI struct {
 	exe        string
 	profileDir string
+	proc       *os.Process // the instance Open launched, if any
 }
 
 func (c *chromiumUI) Blocking() bool { return false }
-func (c *chromiumUI) Close()         {}
 func (c *chromiumUI) Mode() Mode     { return ModeApp }
 
 func (c *chromiumUI) Open(rawURL string) error {
@@ -169,7 +169,43 @@ func (c *chromiumUI) Open(rawURL string) error {
 		"--no-first-run",
 		"--no-default-browser-check",
 	}
-	return exec.Command(c.exe, args...).Start()
+	cmd := exec.Command(c.exe, args...)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	c.proc = cmd.Process
+	return nil
+}
+
+// Close terminates the chromium instance this UI launched, if it is still
+// running. The daemon calls this on every shutdown path, not just closing the
+// window: without it, the process this Open call started outlives the daemon
+// indefinitely on macOS (see killStaleProfileHolder), which contradicts the
+// "quits with the browser... does not linger in the background" promise —
+// the browser instance kept lingering even though the daemon itself had
+// already exited on schedule.
+func (c *chromiumUI) Close() {
+	if c.proc == nil {
+		return
+	}
+	terminate(c.proc)
+}
+
+// terminate asks proc to exit via SIGTERM, falling back to Kill (the only
+// signal Go supports on every OS) on platforms where SIGTERM is not
+// implemented (Windows) or the process ignores it.
+func terminate(proc *os.Process) {
+	if proc.Signal(syscall.SIGTERM) != nil {
+		_ = proc.Kill()
+		return
+	}
+	done := make(chan struct{})
+	go func() { _, _ = proc.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		_ = proc.Kill()
+	}
 }
 
 // killStaleProfileHolder terminates whatever process still holds profileDir's
