@@ -29,8 +29,7 @@
     | "restore"
     | "reset"
     | "disableauth"
-    | "rollback"
-    | "sudo";
+    | "rollback";
   let modal = $state<SecModal>(null);
   let curPw = $state("");
   let newPw = $state("");
@@ -55,53 +54,6 @@
     }
   }
   loadBackups();
-
-  // ---- Root access: passwordless sudo via /etc/sudoers.d/<user> ----
-  type SudoState = { supported: boolean; nopasswd?: boolean; user: string; file: string; error?: string };
-  let sudo = $state<SudoState | null>(null);
-  let sudoPw = $state("");
-
-  async function loadSudo() {
-    try {
-      sudo = await api.get<SudoState>("/api/system/sudo");
-    } catch {
-      sudo = null;
-    }
-  }
-  loadSudo();
-
-  async function enableSudo() {
-    busy = true;
-    try {
-      const r = await api.post<{ nopasswd: boolean; file: string }>("/api/system/sudo", { password: sudoPw });
-      sudoPw = "";
-      modal = null;
-      notify(
-        r.nopasswd ? "success" : "error",
-        r.nopasswd ? `Written ${r.file} — sudo no longer asks for a password` : `Written ${r.file}, but sudo still asks for a password`,
-      );
-    } catch (e) {
-      notify("error", e instanceof Error ? e.message : String(e));
-    } finally {
-      sudoPw = "";
-      busy = false;
-      loadSudo();
-    }
-  }
-
-  async function disableSudo() {
-    if (!sudo || !confirm(`Remove ${sudo.file}? sudo will ask for your password again.`)) return;
-    busy = true;
-    try {
-      await api.del("/api/system/sudo");
-      notify("success", `Removed ${sudo.file}`);
-    } catch (e) {
-      notify("error", e instanceof Error ? e.message : String(e));
-    } finally {
-      busy = false;
-      loadSudo();
-    }
-  }
 
   function openModal(m: SecModal) {
     modal = m;
@@ -511,33 +463,6 @@
   </section>
 
   <section>
-    <h3>Root access</h3>
-    {#if !sudo}
-      <p class="muted">Checking sudo…</p>
-    {:else if !sudo.supported}
-      <p class="muted">Not available: {sudo.error}</p>
-    {:else}
-      <p class="muted">
-        Lets <span class="mono">{sudo.user}</span> use sudo without a password by adding
-        <span class="mono">{sudo.user} ALL=(ALL) NOPASSWD: ALL</span> to
-        <span class="mono">{sudo.file}</span>. Anything running as {sudo.user} — any script or
-        package, not only webssh — can then become root without asking.
-      </p>
-      <div class="row" style="flex-wrap:wrap;align-items:center">
-        {#if sudo.nopasswd}
-          <span class="tag" style="color:var(--success)">✓ sudo works without a password</span>
-          <div class="spacer"></div>
-          <button class="danger ghost" onclick={disableSudo} disabled={busy}>Remove</button>
-        {:else}
-          <span class="muted">sudo asks for a password</span>
-          <div class="spacer"></div>
-          <button onclick={() => openModal("sudo")} disabled={busy}>sudo root…</button>
-        {/if}
-      </div>
-    {/if}
-  </section>
-
-  <section>
     <h3>Security &amp; backup</h3>
     <p class="muted">
       The master password locks this panel and encrypts backups. A backup contains your whole
@@ -665,31 +590,6 @@
         <div class="spacer"></div>
         <button onclick={() => (modal = null)}>Cancel</button>
         <button class="primary" onclick={() => savePassword(false)} disabled={busy}>Save</button>
-      </div>
-  </Modal>
-{/if}
-
-{#if modal === "sudo" && sudo}
-  <Modal titleId="sudo-title" onclose={() => ((modal = null), (sudoPw = ""))}>
-      <h2 id="sudo-title">Passwordless sudo</h2>
-      <p class="muted" style="margin-top:0">
-        Your sudo password is used once to write <span class="mono">{sudo.file}</span>
-        (checked with <span class="mono">visudo</span> first). It goes to sudo directly and is not stored.
-      </p>
-      <div class="field">
-        <label for="sudopw">sudo password for {sudo.user}</label>
-        <input
-          id="sudopw"
-          type="password"
-          bind:value={sudoPw}
-          autocomplete="current-password"
-          onkeydown={(e) => e.key === "Enter" && sudoPw && !busy && enableSudo()}
-        />
-      </div>
-      <div class="row">
-        <div class="spacer"></div>
-        <button onclick={() => ((modal = null), (sudoPw = ""))}>Cancel</button>
-        <button class="primary" onclick={enableSudo} disabled={busy || !sudoPw}>Enable</button>
       </div>
   </Modal>
 {/if}
