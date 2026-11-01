@@ -156,6 +156,9 @@ func (c *chromiumUI) Mode() Mode     { return ModeApp }
 
 func (c *chromiumUI) Open(rawURL string) error {
 	killStaleProfileHolder(c.profileDir)
+	// --class below only reaches X11; on Wayland the icon comes from a
+	// .desktop file named after the window's URL-derived app_id.
+	ensureDesktopAlias(c.exe, rawURL)
 	args := []string{
 		"--app=" + rawURL,
 		// A private profile is what makes this feel like an application rather
@@ -164,7 +167,7 @@ func (c *chromiumUI) Open(rawURL string) error {
 		"--user-data-dir=" + c.profileDir,
 		// Without this chromium invents a WM_CLASS from the URL, so the window
 		// would not group under the webssh icon (see StartupWMClass in the
-		// .desktop file).
+		// .desktop file). X11 only: Wayland ignores it, see desktop_alias.go.
 		"--class=webssh",
 		"--no-first-run",
 		"--no-default-browser-check",

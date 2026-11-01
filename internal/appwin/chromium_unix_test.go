@@ -24,6 +24,7 @@ func TestCloseTerminatesLaunchedProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	t.Setenv("XDG_DATA_HOME", t.TempDir()) // Open writes a .desktop alias there
 	ui := &chromiumUI{exe: exe, profileDir: t.TempDir()}
 	if err := ui.Open("http://example.test"); err != nil {
 		t.Fatalf("Open() error = %v", err)

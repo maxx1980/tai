@@ -208,6 +208,8 @@ install-desktop: icons
 
 uninstall-desktop:
 	rm -f $(DESKTOP_DIR)/$(BINARY).desktop
+	# Hidden <app_id>.desktop aliases written by the daemon for the Wayland icon.
+	-grep -lx 'X-Webssh-Alias=true' $(DESKTOP_DIR)/*.desktop 2>/dev/null | xargs -r rm -f
 	for n in $(ICON_SIZES); do \
 		rm -f $(ICON_DIR)/$${n}x$${n}/apps/$(BINARY).png; \
 	done

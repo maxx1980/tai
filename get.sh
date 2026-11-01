@@ -121,6 +121,11 @@ if ((do_uninstall)); then
 	done
 
 	rm -f "$bindir/$BINARY" "$desktop" "$icondir/scalable/apps/$BINARY.svg"
+	# Hidden <app_id>.desktop aliases the daemon writes so the app window gets
+	# its icon on Wayland; only files carrying webssh's marker are removed.
+	for f in "$appdir"/*.desktop; do
+		[[ -f $f ]] && grep -qx 'X-Webssh-Alias=true' "$f" && rm -f "$f"
+	done
 	for n in $ICON_SIZES; do
 		rm -f "$icondir/${n}x${n}/apps/$BINARY.png"
 	done
