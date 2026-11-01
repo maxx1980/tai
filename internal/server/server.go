@@ -243,6 +243,7 @@ func (s *Server) routes() {
 	api("POST /api/known-hosts/add", s.handleAddKnownHosts)
 	api("POST /api/known-hosts/scan", s.handleScanKnownHost)
 	api("POST /api/known-hosts/export-all", s.handleExportAllKnownHosts)
+	api("POST /api/known-hosts/ssh-remove-line", s.handleSSHRemoveKnownHostLine)
 	api("POST /api/known-hosts/{id}/ssh-export", s.handleSSHExportKnownHost)
 	api("POST /api/known-hosts/{id}/ssh-remove", s.handleSSHRemoveKnownHost)
 	api("DELETE /api/known-hosts/{id}", s.handleDeleteKnownHost)

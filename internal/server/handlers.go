@@ -122,6 +122,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.enrichKnownHosts(knownHosts, hosts)
+	knownHosts = append(knownHosts, s.sshOnlyKnownHosts(knownHosts, hosts)...)
 	settings := s.settingsWithDefaults()
 	mounts, _ := mount.List(settings[config.KeyMountBaseDir])
 	writeJSON(w, 200, map[string]any{

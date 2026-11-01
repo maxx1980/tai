@@ -56,6 +56,10 @@ export interface KnownHost {
   fingerprint?: string;
   /** Inventory hosts this entry belongs to (matched even when hashed). */
   matches?: KnownHostMatch[];
+  /** False for an entry found only in ~/.ssh/known_hosts (id is then a negative placeholder). */
+  in_db?: boolean;
+  /** The known_hosts line of an ~/.ssh-only entry, for adding or removing it. */
+  line?: string;
 }
 
 export interface KnownHostMatch {

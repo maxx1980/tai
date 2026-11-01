@@ -25,7 +25,60 @@ func (s *Server) enrichKnownHosts(list []store.KnownHost, hosts []store.Host) {
 		list[i].Fingerprint = knownhosts.Fingerprint(list[i])
 		list[i].InSSH = idx[knownhosts.Identity(list[i])]
 		list[i].Matches = knownhosts.Matches(list[i], hosts)
+		list[i].InDB = true
 	}
+}
+
+// sshOnlyKnownHosts returns the ~/.ssh/known_hosts entries webssh has not
+// stored, so the panel lists every key ssh trusts, not only imported ones.
+// They get negative placeholder IDs (never sent back to ID-based endpoints).
+func (s *Server) sshOnlyKnownHosts(stored []store.KnownHost, hosts []store.Host) []store.KnownHost {
+	data, err := os.ReadFile(s.knownHostsPath())
+	if err != nil {
+		return nil
+	}
+	have := make(map[string]bool, len(stored))
+	for _, kh := range stored {
+		have[knownhosts.Identity(kh)] = true
+	}
+	var out []store.KnownHost
+	for _, kh := range knownhosts.Parse(data) {
+		id := knownhosts.Identity(kh)
+		if have[id] {
+			continue
+		}
+		have[id] = true // the file may repeat a line
+		kh.ID = -int64(len(out) + 1)
+		kh.InSSH = true
+		kh.Line = knownhosts.Line(kh)
+		kh.Fingerprint = knownhosts.Fingerprint(kh)
+		kh.Matches = knownhosts.Matches(kh, hosts)
+		out = append(out, kh)
+	}
+	return out
+}
+
+// handleSSHRemoveKnownHostLine deletes an entry given as a known_hosts line
+// from ~/.ssh/known_hosts — for entries that exist only there and so have no
+// stored ID.
+func (s *Server) handleSSHRemoveKnownHostLine(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Line string `json:"line"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	entries := knownhosts.Parse([]byte(body.Line))
+	if len(entries) != 1 {
+		writeErr(w, 400, fmt.Errorf("expected exactly one known_hosts line"))
+		return
+	}
+	if err := knownhosts.RemoveFromSSH(s.knownHostsPath(), entries[0]); err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"removed": true})
 }
 
 // storeKnownHosts inserts parsed entries and returns how many were newly added.

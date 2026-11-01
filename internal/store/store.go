@@ -574,6 +574,11 @@ type KnownHost struct {
 	InSSH       bool             `json:"in_ssh"`
 	Fingerprint string           `json:"fingerprint,omitempty"`
 	Matches     []KnownHostMatch `json:"matches,omitempty"` // inventory hosts the entry belongs to
+	// InDB is false for an entry that lives only in ~/.ssh/known_hosts and is
+	// listed alongside the stored ones (its ID is then a negative placeholder);
+	// Line carries it verbatim so the SPA can add or remove it.
+	InDB bool   `json:"in_db"`
+	Line string `json:"line,omitempty"`
 }
 
 // KnownHostMatch names an inventory host a known_hosts entry belongs to, and

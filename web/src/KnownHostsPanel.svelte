@@ -22,6 +22,7 @@
   const inInventory = $derived(app.known_hosts.filter((kh) => kh.matches?.length));
   const notInInventory = $derived(app.known_hosts.filter((kh) => !kh.matches?.length));
   const shown = $derived(tab === "inventory" ? inInventory : notInInventory);
+  const stored = $derived(app.known_hosts.filter((kh) => kh.in_db));
 
   let busy = $state(false);
 
@@ -127,11 +128,25 @@
     }
   }
 
-  async function removeFromSSH(kh: KnownHost) {
-    if (!confirm(`Delete the ~/.ssh/known_hosts entry for "${label(kh)}"? The webssh copy is kept.`))
-      return;
+  // An entry that exists only in ~/.ssh/known_hosts: store it in webssh.
+  async function addToDB(kh: KnownHost) {
     try {
-      await api.post(`/api/known-hosts/${kh.id}/ssh-remove`);
+      await api.post("/api/known-hosts/add", { data: kh.line });
+      await refresh();
+      notify("success", "Added to webssh");
+    } catch (e) {
+      notify("error", String(e));
+    }
+  }
+
+  async function removeFromSSH(kh: KnownHost) {
+    const kept = kh.in_db
+      ? "The webssh copy is kept."
+      : "webssh has no copy of it, so ssh will ask you to trust this machine again.";
+    if (!confirm(`Delete the ~/.ssh/known_hosts entry for "${label(kh)}"? ${kept}`)) return;
+    try {
+      if (kh.in_db) await api.post(`/api/known-hosts/${kh.id}/ssh-remove`);
+      else await api.post("/api/known-hosts/ssh-remove-line", { line: kh.line });
       await refresh();
       notify("success", "Removed from ~/.ssh/known_hosts");
     } catch (e) {
@@ -156,7 +171,7 @@
   <button onclick={importFromSSH} disabled={busy}>Import from ~/.ssh</button>
   <button onclick={openAdd}>Add / paste…</button>
   <button onclick={() => (scanOpen = true)}>Scan host…</button>
-  <button class="primary" onclick={exportAll} disabled={busy || app.known_hosts.length === 0}>
+  <button class="primary" onclick={exportAll} disabled={busy || stored.length === 0}>
     Export all to ~/.ssh
   </button>
 </div>
@@ -224,14 +239,23 @@
         {/if}
         <span class="tag">{kh.key_type}</span>
         {#if kh.marker}<span class="tag warn-tag">{kh.marker}</span>{/if}
-        {#if kh.in_ssh}<span class="muted" title="present in ~/.ssh/known_hosts">✓ ~/.ssh</span>{/if}
+        {#if !kh.in_db}
+          <span class="tag" title="present in ~/.ssh/known_hosts but not stored in webssh">only in ~/.ssh</span>
+        {:else if kh.in_ssh}
+          <span class="muted" title="present in ~/.ssh/known_hosts">✓ ~/.ssh</span>
+        {/if}
         <div class="spacer"></div>
-        {#if kh.in_ssh}
+        {#if !kh.in_db}
+          <button class="sm ghost" onclick={() => addToDB(kh)}>Add to webssh</button>
           <button class="sm danger ghost" onclick={() => removeFromSSH(kh)}>Delete from ~/.ssh</button>
         {:else}
-          <button class="sm ghost" onclick={() => exportToSSH(kh)}>Export to ~/.ssh</button>
+          {#if kh.in_ssh}
+            <button class="sm danger ghost" onclick={() => removeFromSSH(kh)}>Delete from ~/.ssh</button>
+          {:else}
+            <button class="sm ghost" onclick={() => exportToSSH(kh)}>Export to ~/.ssh</button>
+          {/if}
+          <button class="sm danger ghost" onclick={() => forget(kh)}>Forget</button>
         {/if}
-        <button class="sm danger ghost" onclick={() => forget(kh)}>Forget</button>
       </div>
       <div class="mono fp" title={kh.fingerprint}>{kh.fingerprint}</div>
       {#if kh.comment}<div class="muted" style="font-size:12px">{kh.comment}</div>{/if}
