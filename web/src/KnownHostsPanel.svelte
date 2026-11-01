@@ -8,7 +8,20 @@
   const isHashed = (kh: KnownHost) => kh.hosts.startsWith("|1|");
   // A hash says nothing to a person: name the entry by its matched host.
   const label = (kh: KnownHost) =>
-    kh.matches?.length ? kh.matches.map((m) => m.alias).join(", ") : isHashed(kh) ? "unknown (hashed) host" : kh.hosts;
+    kh.matches?.length
+      ? kh.matches.map((m) => m.alias).join(", ")
+      : isHashed(kh)
+        ? "a hashed host not in inventory"
+        : kh.hosts;
+
+  // Entries are split by whether an inventory host owns them. The rest are
+  // still real machines ssh talks to (github.com, servers reached by another
+  // name), so they get their own tab rather than looking like leftovers.
+  type Tab = "inventory" | "other";
+  let tab = $state<Tab>("inventory");
+  const inInventory = $derived(app.known_hosts.filter((kh) => kh.matches?.length));
+  const notInInventory = $derived(app.known_hosts.filter((kh) => !kh.matches?.length));
+  const shown = $derived(tab === "inventory" ? inInventory : notInInventory);
 
   let busy = $state(false);
 
@@ -153,10 +166,43 @@
     No entries yet. Import them from <span class="mono">~/.ssh/known_hosts</span>, paste lines, or
     scan a host.
   </p>
+{:else}
+  <div class="tabs" role="tablist" aria-label="Known hosts">
+    <button
+      role="tab"
+      id="kh-tab-inventory"
+      aria-selected={tab === "inventory"}
+      aria-controls="kh-panel"
+      class:active={tab === "inventory"}
+      onclick={() => (tab = "inventory")}>In inventory <span class="count">{inInventory.length}</span></button
+    >
+    <button
+      role="tab"
+      id="kh-tab-other"
+      aria-selected={tab === "other"}
+      aria-controls="kh-panel"
+      class:active={tab === "other"}
+      onclick={() => (tab = "other")}>Not in inventory <span class="count">{notInInventory.length}</span></button
+    >
+  </div>
+  {#if tab === "other"}
+    <p class="muted note">
+      Keys of machines that no inventory host matches — services like github.com, or servers you
+      reach by a name or address the inventory does not list. ssh still relies on them: deleting one
+      from <span class="mono">~/.ssh</span> makes ssh ask you to trust that machine again.
+    </p>
+  {/if}
+  {#if shown.length === 0}
+    <p class="muted">
+      {tab === "inventory"
+        ? "No entry matches a host in your inventory yet."
+        : "Every entry belongs to a host in your inventory."}
+    </p>
+  {/if}
 {/if}
 
-<div class="list">
-  {#each app.known_hosts as kh (kh.id)}
+<div class="list" id="kh-panel" role="tabpanel" aria-labelledby={tab === "inventory" ? "kh-tab-inventory" : "kh-tab-other"}>
+  {#each shown as kh (kh.id)}
     <div class="card">
       <div class="row hostrow">
         {#if kh.matches?.length}
@@ -165,14 +211,14 @@
             <span class="muted mono name">{kh.matches.map((m) => m.name).join(", ")}</span>
           </strong>
         {:else if isHashed(kh)}
-          <strong class="hosts muted" title={kh.hosts}>unknown host</strong>
+          <strong class="hosts muted" title={kh.hosts}>not in inventory</strong>
         {:else}
           <strong class="hosts" title={kh.hosts}>{kh.hosts}</strong>
         {/if}
         {#if isHashed(kh)}
           <span
             class="tag"
-            title="ssh stored only a hash of the host name (HashKnownHosts). It is matched against the hosts in your inventory; an entry no inventory host matches belongs to a machine webssh does not know."
+            title="ssh stored only a hash of the host name (HashKnownHosts). It is matched against the hosts in your inventory; an entry no inventory host matches belongs to a machine that is not in your inventory."
             >hashed</span
           >
         {/if}
@@ -257,5 +303,18 @@
   .hosts { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
   .hosts .name { font-weight: normal; font-size: 12px; margin-left: 6px; }
   .fp { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
+  .tabs button {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    color: var(--muted);
+    padding: 6px 10px;
+    margin-bottom: -1px;
+  }
+  .tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
+  .tabs .count { font-size: 12px; color: var(--muted); margin-left: 4px; }
+  .note { font-size: 12px; margin: 0 0 12px; }
   .warn-tag { background: color-mix(in srgb, var(--danger) 20%, transparent); }
 </style>
