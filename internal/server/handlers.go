@@ -121,7 +121,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err)
 		return
 	}
-	s.enrichKnownHosts(knownHosts)
+	s.enrichKnownHosts(knownHosts, hosts)
 	settings := s.settingsWithDefaults()
 	mounts, _ := mount.List(settings[config.KeyMountBaseDir])
 	writeJSON(w, 200, map[string]any{

@@ -16,13 +16,15 @@ import (
 // knownHostsPath is the user's ~/.ssh/known_hosts file.
 func (s *Server) knownHostsPath() string { return filepath.Join(s.sshDir(), "known_hosts") }
 
-// enrichKnownHosts marks each entry with its fingerprint and whether an
-// equivalent entry currently lives in ~/.ssh/known_hosts.
-func (s *Server) enrichKnownHosts(list []store.KnownHost) {
+// enrichKnownHosts marks each entry with its fingerprint, whether an
+// equivalent entry currently lives in ~/.ssh/known_hosts, and which inventory
+// hosts it belongs to (hashed entries carry no readable name otherwise).
+func (s *Server) enrichKnownHosts(list []store.KnownHost, hosts []store.Host) {
 	idx := knownhosts.IndexSSH(s.knownHostsPath())
 	for i := range list {
 		list[i].Fingerprint = knownhosts.Fingerprint(list[i])
 		list[i].InSSH = idx[knownhosts.Identity(list[i])]
+		list[i].Matches = knownhosts.Matches(list[i], hosts)
 	}
 }
 
@@ -154,7 +156,8 @@ func (s *Server) handleSSHExportKnownHost(w http.ResponseWriter, r *http.Request
 		return
 	}
 	list := []store.KnownHost{kh}
-	s.enrichKnownHosts(list)
+	hosts, _ := s.st.ListHosts()
+	s.enrichKnownHosts(list, hosts)
 	writeJSON(w, 200, list[0])
 }
 
@@ -170,7 +173,8 @@ func (s *Server) handleSSHRemoveKnownHost(w http.ResponseWriter, r *http.Request
 		return
 	}
 	list := []store.KnownHost{kh}
-	s.enrichKnownHosts(list)
+	hosts, _ := s.st.ListHosts()
+	s.enrichKnownHosts(list, hosts)
 	writeJSON(w, 200, list[0])
 }
 

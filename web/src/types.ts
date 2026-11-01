@@ -54,6 +54,15 @@ export interface KnownHost {
   comment: string;
   in_ssh?: boolean;
   fingerprint?: string;
+  /** Inventory hosts this entry belongs to (matched even when hashed). */
+  matches?: KnownHostMatch[];
+}
+
+export interface KnownHostMatch {
+  host_id: number;
+  alias: string;
+  /** The name that matched: address, alias or "[name]:port". */
+  name: string;
 }
 
 export interface Mount {

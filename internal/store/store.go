@@ -571,8 +571,17 @@ type KnownHost struct {
 	Comment string `json:"comment"`
 
 	// Computed at request time (not persisted).
-	InSSH       bool   `json:"in_ssh"`
-	Fingerprint string `json:"fingerprint,omitempty"`
+	InSSH       bool             `json:"in_ssh"`
+	Fingerprint string           `json:"fingerprint,omitempty"`
+	Matches     []KnownHostMatch `json:"matches,omitempty"` // inventory hosts the entry belongs to
+}
+
+// KnownHostMatch names an inventory host a known_hosts entry belongs to, and
+// the name (address, alias or "[name]:port") that matched its host field.
+type KnownHostMatch struct {
+	HostID int64  `json:"host_id"`
+	Alias  string `json:"alias"`
+	Name   string `json:"name"`
 }
 
 // ListKnownHosts returns all managed known_hosts entries.

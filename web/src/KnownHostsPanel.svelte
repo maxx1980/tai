@@ -4,6 +4,12 @@
   import { app, refresh, notify } from "./store.svelte";
   import type { KnownHost } from "./types";
 
+  // ssh's HashKnownHosts writes "|1|salt|hash" instead of the host name.
+  const isHashed = (kh: KnownHost) => kh.hosts.startsWith("|1|");
+  // A hash says nothing to a person: name the entry by its matched host.
+  const label = (kh: KnownHost) =>
+    kh.matches?.length ? kh.matches.map((m) => m.alias).join(", ") : isHashed(kh) ? "unknown (hashed) host" : kh.hosts;
+
   let busy = $state(false);
 
   // Add / paste modal.
@@ -109,7 +115,7 @@
   }
 
   async function removeFromSSH(kh: KnownHost) {
-    if (!confirm(`Delete the ~/.ssh/known_hosts entry for "${kh.hosts}"? The webssh copy is kept.`))
+    if (!confirm(`Delete the ~/.ssh/known_hosts entry for "${label(kh)}"? The webssh copy is kept.`))
       return;
     try {
       await api.post(`/api/known-hosts/${kh.id}/ssh-remove`);
@@ -121,7 +127,7 @@
   }
 
   async function forget(kh: KnownHost) {
-    if (!confirm(`Forget known-host entry for "${kh.hosts}"?`)) return;
+    if (!confirm(`Forget known-host entry for "${label(kh)}"?`)) return;
     try {
       await api.del(`/api/known-hosts/${kh.id}`);
       await refresh();
@@ -153,7 +159,23 @@
   {#each app.known_hosts as kh (kh.id)}
     <div class="card">
       <div class="row hostrow">
-        <strong class="hosts" title={kh.hosts}>{kh.hosts}</strong>
+        {#if kh.matches?.length}
+          <strong class="hosts" title={kh.hosts}>
+            {kh.matches.map((m) => m.alias).join(", ")}
+            <span class="muted mono name">{kh.matches.map((m) => m.name).join(", ")}</span>
+          </strong>
+        {:else if isHashed(kh)}
+          <strong class="hosts muted" title={kh.hosts}>unknown host</strong>
+        {:else}
+          <strong class="hosts" title={kh.hosts}>{kh.hosts}</strong>
+        {/if}
+        {#if isHashed(kh)}
+          <span
+            class="tag"
+            title="ssh stored only a hash of the host name (HashKnownHosts). It is matched against the hosts in your inventory; an entry no inventory host matches belongs to a machine webssh does not know."
+            >hashed</span
+          >
+        {/if}
         <span class="tag">{kh.key_type}</span>
         {#if kh.marker}<span class="tag warn-tag">{kh.marker}</span>{/if}
         {#if kh.in_ssh}<span class="muted" title="present in ~/.ssh/known_hosts">✓ ~/.ssh</span>{/if}
@@ -233,6 +255,7 @@
     gap: 6px;
   }
   .hosts { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
+  .hosts .name { font-weight: normal; font-size: 12px; margin-left: 6px; }
   .fp { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .warn-tag { background: color-mix(in srgb, var(--danger) 20%, transparent); }
 </style>
