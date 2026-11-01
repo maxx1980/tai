@@ -2,7 +2,7 @@
   import { api } from "./api";
   import Modal from "./Modal.svelte";
   import { app, refresh, notify } from "./store.svelte";
-  import type { KnownHost } from "./types";
+  import type { KnownHost, KnownHostMatch } from "./types";
 
   // ssh's HashKnownHosts writes "|1|salt|hash" instead of the host name.
   const isHashed = (kh: KnownHost) => kh.hosts.startsWith("|1|");
@@ -14,13 +14,42 @@
         ? "a hashed host not in inventory"
         : kh.hosts;
 
-  // Entries are split by whether an inventory host owns them. The rest are
+  // known_hosts holds one line per host key type, so a server with ECDSA, RSA
+  // and Ed25519 keys has three lines — deleting one left ssh trusting the
+  // others. Lines are grouped per machine: by the inventory hosts they match,
+  // or by their (plain) host field. Hashed lines no host matches carry a
+  // different salt each and cannot be told apart, so they stay one per card.
+  interface HostGroup {
+    key: string;
+    entries: KnownHost[];
+    matches: KnownHostMatch[];
+  }
+  function groupKey(kh: KnownHost): string {
+    if (kh.matches?.length) return "h:" + kh.matches.map((m) => m.host_id).sort((a, b) => a - b).join(",");
+    if (!isHashed(kh)) return "p:" + kh.hosts;
+    return "e:" + kh.id;
+  }
+  const groups = $derived.by(() => {
+    const by = new Map<string, HostGroup>();
+    for (const kh of app.known_hosts) {
+      const k = groupKey(kh);
+      let g = by.get(k);
+      if (!g) by.set(k, (g = { key: k, entries: [], matches: [] }));
+      g.entries.push(kh);
+      for (const m of kh.matches ?? [])
+        if (!g.matches.some((x) => x.host_id === m.host_id && x.name === m.name)) g.matches.push(m);
+    }
+    return [...by.values()];
+  });
+  const groupLabel = (g: HostGroup) => label(g.entries[0]);
+
+  // Groups are split by whether an inventory host owns them. The rest are
   // still real machines ssh talks to (github.com, servers reached by another
   // name), so they get their own tab rather than looking like leftovers.
   type Tab = "inventory" | "other";
   let tab = $state<Tab>("inventory");
-  const inInventory = $derived(app.known_hosts.filter((kh) => kh.matches?.length));
-  const notInInventory = $derived(app.known_hosts.filter((kh) => !kh.matches?.length));
+  const inInventory = $derived(groups.filter((g) => g.matches.length));
+  const notInInventory = $derived(groups.filter((g) => !g.matches.length));
   const shown = $derived(tab === "inventory" ? inInventory : notInInventory);
   const stored = $derived(app.known_hosts.filter((kh) => kh.in_db));
 
@@ -118,47 +147,67 @@
     }
   }
 
-  async function exportToSSH(kh: KnownHost) {
+  // Group actions apply to every key line of the machine.
+  async function each(g: HostGroup, pick: (kh: KnownHost) => boolean, run: (kh: KnownHost) => Promise<unknown>) {
+    busy = true;
     try {
-      await api.post(`/api/known-hosts/${kh.id}/ssh-export`);
+      for (const kh of g.entries.filter(pick)) await run(kh);
+    } finally {
       await refresh();
-      notify("success", "Exported to ~/.ssh/known_hosts");
+      busy = false;
+    }
+  }
+
+  async function exportToSSH(g: HostGroup) {
+    try {
+      await each(g, (kh) => !!kh.in_db && !kh.in_ssh, (kh) => api.post(`/api/known-hosts/${kh.id}/ssh-export`));
+      notify("success", `Exported ${groupLabel(g)} to ~/.ssh/known_hosts`);
     } catch (e) {
       notify("error", String(e));
     }
   }
 
-  // An entry that exists only in ~/.ssh/known_hosts: store it in webssh.
-  async function addToDB(kh: KnownHost) {
+  // Lines that exist only in ~/.ssh/known_hosts: store them in webssh.
+  async function addToDB(g: HostGroup) {
+    const lines = g.entries.filter((kh) => !kh.in_db && kh.line).map((kh) => kh.line);
     try {
-      await api.post("/api/known-hosts/add", { data: kh.line });
+      busy = true;
+      await api.post("/api/known-hosts/add", { data: lines.join("\n") });
+      notify("success", `Added ${lines.length} key(s) of ${groupLabel(g)} to webssh`);
+    } catch (e) {
+      notify("error", String(e));
+    } finally {
       await refresh();
-      notify("success", "Added to webssh");
+      busy = false;
+    }
+  }
+
+  async function removeFromSSH(g: HostGroup) {
+    const inSSH = g.entries.filter((kh) => kh.in_ssh);
+    const kept = inSSH.every((kh) => kh.in_db)
+      ? "The webssh copies are kept."
+      : "webssh has no copy of some of them, so ssh will ask you to trust this machine again.";
+    if (!confirm(`Delete all ${inSSH.length} key(s) of "${groupLabel(g)}" from ~/.ssh/known_hosts? ${kept}`)) return;
+    try {
+      await each(
+        g,
+        (kh) => !!kh.in_ssh,
+        (kh) =>
+          kh.in_db
+            ? api.post(`/api/known-hosts/${kh.id}/ssh-remove`)
+            : api.post("/api/known-hosts/ssh-remove-line", { line: kh.line }),
+      );
+      notify("success", `Removed ${groupLabel(g)} from ~/.ssh/known_hosts`);
     } catch (e) {
       notify("error", String(e));
     }
   }
 
-  async function removeFromSSH(kh: KnownHost) {
-    const kept = kh.in_db
-      ? "The webssh copy is kept."
-      : "webssh has no copy of it, so ssh will ask you to trust this machine again.";
-    if (!confirm(`Delete the ~/.ssh/known_hosts entry for "${label(kh)}"? ${kept}`)) return;
+  async function forget(g: HostGroup) {
+    const n = g.entries.filter((kh) => kh.in_db).length;
+    if (!confirm(`Forget all ${n} stored key(s) of "${groupLabel(g)}"? ~/.ssh is not touched.`)) return;
     try {
-      if (kh.in_db) await api.post(`/api/known-hosts/${kh.id}/ssh-remove`);
-      else await api.post("/api/known-hosts/ssh-remove-line", { line: kh.line });
-      await refresh();
-      notify("success", "Removed from ~/.ssh/known_hosts");
-    } catch (e) {
-      notify("error", String(e));
-    }
-  }
-
-  async function forget(kh: KnownHost) {
-    if (!confirm(`Forget known-host entry for "${label(kh)}"?`)) return;
-    try {
-      await api.del(`/api/known-hosts/${kh.id}`);
-      await refresh();
+      await each(g, (kh) => !!kh.in_db, (kh) => api.del(`/api/known-hosts/${kh.id}`));
     } catch (e) {
       notify("error", String(e));
     }
@@ -217,48 +266,65 @@
 {/if}
 
 <div class="list" id="kh-panel" role="tabpanel" aria-labelledby={tab === "inventory" ? "kh-tab-inventory" : "kh-tab-other"}>
-  {#each shown as kh (kh.id)}
+  {#each shown as g (g.key)}
+    {@const first = g.entries[0]}
+    {@const anyHashed = g.entries.some(isHashed)}
+    {@const allInSSH = g.entries.every((kh) => kh.in_ssh)}
+    {@const noneInDB = g.entries.every((kh) => !kh.in_db)}
     <div class="card">
       <div class="row hostrow">
-        {#if kh.matches?.length}
-          <strong class="hosts" title={kh.hosts}>
-            {kh.matches.map((m) => m.alias).join(", ")}
-            <span class="muted mono name">{kh.matches.map((m) => m.name).join(", ")}</span>
+        {#if g.matches.length}
+          <strong class="hosts" title={g.entries.map((kh) => kh.hosts).join("\n")}>
+            {[...new Set(g.matches.map((m) => m.alias))].join(", ")}
+            <span class="muted mono name">{[...new Set(g.matches.map((m) => m.name))].join(", ")}</span>
           </strong>
-        {:else if isHashed(kh)}
-          <strong class="hosts muted" title={kh.hosts}>not in inventory</strong>
+        {:else if isHashed(first)}
+          <strong class="hosts muted" title={first.hosts}>not in inventory</strong>
         {:else}
-          <strong class="hosts" title={kh.hosts}>{kh.hosts}</strong>
+          <strong class="hosts" title={first.hosts}>{first.hosts}</strong>
         {/if}
-        {#if isHashed(kh)}
+        {#if anyHashed}
           <span
             class="tag"
             title="ssh stored only a hash of the host name (HashKnownHosts). It is matched against the hosts in your inventory; an entry no inventory host matches belongs to a machine that is not in your inventory."
             >hashed</span
           >
         {/if}
-        <span class="tag">{kh.key_type}</span>
-        {#if kh.marker}<span class="tag warn-tag">{kh.marker}</span>{/if}
-        {#if !kh.in_db}
+        <span class="tag" title="ssh keeps one known_hosts line per host key type">
+          {g.entries.length} key{g.entries.length === 1 ? "" : "s"}
+        </span>
+        {#if g.entries.some((kh) => kh.marker)}<span class="tag warn-tag">{first.marker || "@marker"}</span>{/if}
+        {#if noneInDB}
           <span class="tag" title="present in ~/.ssh/known_hosts but not stored in webssh">only in ~/.ssh</span>
-        {:else if kh.in_ssh}
-          <span class="muted" title="present in ~/.ssh/known_hosts">✓ ~/.ssh</span>
+        {:else if allInSSH}
+          <span class="muted" title="every key is in ~/.ssh/known_hosts">✓ ~/.ssh</span>
+        {:else if g.entries.some((kh) => kh.in_ssh)}
+          <span class="muted" title="some keys are in ~/.ssh/known_hosts">partly in ~/.ssh</span>
         {/if}
         <div class="spacer"></div>
-        {#if !kh.in_db}
-          <button class="sm ghost" onclick={() => addToDB(kh)}>Add to webssh</button>
-          <button class="sm danger ghost" onclick={() => removeFromSSH(kh)}>Delete from ~/.ssh</button>
-        {:else}
-          {#if kh.in_ssh}
-            <button class="sm danger ghost" onclick={() => removeFromSSH(kh)}>Delete from ~/.ssh</button>
-          {:else}
-            <button class="sm ghost" onclick={() => exportToSSH(kh)}>Export to ~/.ssh</button>
-          {/if}
-          <button class="sm danger ghost" onclick={() => forget(kh)}>Forget</button>
+        {#if g.entries.some((kh) => !kh.in_db)}
+          <button class="sm ghost" disabled={busy} onclick={() => addToDB(g)}>Add to webssh</button>
+        {/if}
+        {#if g.entries.some((kh) => kh.in_db && !kh.in_ssh)}
+          <button class="sm ghost" disabled={busy} onclick={() => exportToSSH(g)}>Export to ~/.ssh</button>
+        {/if}
+        {#if g.entries.some((kh) => kh.in_ssh)}
+          <button class="sm danger ghost" disabled={busy} onclick={() => removeFromSSH(g)}>Delete from ~/.ssh</button>
+        {/if}
+        {#if g.entries.some((kh) => kh.in_db)}
+          <button class="sm danger ghost" disabled={busy} onclick={() => forget(g)}>Forget</button>
         {/if}
       </div>
-      <div class="mono fp" title={kh.fingerprint}>{kh.fingerprint}</div>
-      {#if kh.comment}<div class="muted" style="font-size:12px">{kh.comment}</div>{/if}
+      {#each g.entries as kh (kh.id)}
+        <div class="mono fp" title={kh.fingerprint}>
+          <span class="ktype">{kh.key_type}</span>
+          {kh.fingerprint}
+          {#if !kh.in_db}<span class="muted"> · only in ~/.ssh</span>{:else if !kh.in_ssh}<span class="muted"> · not in ~/.ssh</span>{/if}
+        </div>
+      {/each}
+      {#if g.entries.some((kh) => kh.comment)}
+        <div class="muted" style="font-size:12px">{g.entries.map((kh) => kh.comment).filter(Boolean).join(" · ")}</div>
+      {/if}
     </div>
   {/each}
 </div>
@@ -326,6 +392,7 @@
   }
   .hosts { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
   .hosts .name { font-weight: normal; font-size: 12px; margin-left: 6px; }
+  .ktype { display: inline-block; min-width: 150px; color: var(--text); }
   .fp { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tabs { display: flex; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
   .tabs button {

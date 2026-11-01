@@ -5,10 +5,13 @@
 // It works by pointing ssh at a tiny helper script (SSH_ASKPASS) and forcing its
 // use (SSH_ASKPASS_REQUIRE=force, OpenSSH >= 8.4). The script carries no secret:
 // the password is passed to the ssh child in the WEBSSH_ASKPASS_PW environment
-// variable, which the script echoes when ssh asks for a password. For a brand-new
-// host key ssh first asks "continue connecting (yes/no)?" — the script answers
-// "yes" (trust-on-first-use); a *changed* host key still fails safely, as ssh
-// refuses it without prompting.
+// variable, which the script echoes when ssh asks for a password. For a host key
+// ssh has not seen it asks "continue connecting (yes/no/[fingerprint])?"; the
+// script never answers that itself — it shows ssh's question (with the key's
+// fingerprint) on the terminal ssh runs in (/dev/tty: the web terminal's PTY or
+// the native terminal) and passes on what the person types. Without a terminal
+// it answers "no". A *changed* host key fails safely regardless: ssh refuses it
+// without prompting.
 package askpass
 
 import (
@@ -28,7 +31,17 @@ const pwEnv = "WEBSSH_ASKPASS_PW"
 const script = `#!/bin/sh
 # Managed by webssh — do not edit. Answers ssh prompts for saved-password hosts.
 case "$1" in
-  *"continue connecting"*|*"(yes/no"*) printf 'yes\n' ;;
+  *"continue connecting"*|*"(yes/no"*)
+    # A host key ssh has not seen: ask the person, never answer for them.
+    # The probe runs in a subshell: in dash a failed redirection on ":" (a
+    # special builtin) would end the whole script instead.
+    if ( : >/dev/tty ) 2>/dev/null; then
+      printf '%s ' "$1" >/dev/tty
+      IFS= read -r ans </dev/tty || ans=no
+      printf '%s\n' "$ans"
+    else
+      printf 'no\n'
+    fi ;;
   *) printf '%s\n' "$` + pwEnv + `" ;;
 esac
 `
