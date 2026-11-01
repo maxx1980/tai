@@ -648,6 +648,51 @@ func (s *Store) SetSetting(key, value string) error {
 	return err
 }
 
+// DeleteSetting removes a stored setting so its default applies again.
+func (s *Store) DeleteSetting(key string) error {
+	_, err := s.db.Exec(`DELETE FROM settings WHERE key=?`, key)
+	return err
+}
+
+// ReplaceIdentityFilePrefix rewrites every host identity_file that starts with
+// oldPrefix so it starts with newPrefix instead, returning how many changed.
+func (s *Store) ReplaceIdentityFilePrefix(oldPrefix, newPrefix string) (int64, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query(`SELECT id, identity_file FROM hosts WHERE identity_file <> ''`)
+	if err != nil {
+		return 0, err
+	}
+	type change struct {
+		id   int64
+		path string
+	}
+	var changes []change
+	for rows.Next() {
+		var c change
+		if err := rows.Scan(&c.id, &c.path); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		if rest, ok := strings.CutPrefix(c.path, oldPrefix); ok {
+			changes = append(changes, change{c.id, newPrefix + rest})
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	for _, c := range changes {
+		if _, err := tx.Exec(`UPDATE hosts SET identity_file=? WHERE id=?`, c.path, c.id); err != nil {
+			return 0, err
+		}
+	}
+	return int64(len(changes)), tx.Commit()
+}
+
 // AllSettings returns every setting as a map.
 func (s *Store) AllSettings() (map[string]string, error) {
 	rows, err := s.db.Query(`SELECT key, value FROM settings`)
@@ -685,6 +730,9 @@ type Snapshot struct {
 	HostKeys   [][2]int64        `json:"host_keys"` // {key_id, host_id}
 	KnownHosts []KnownHost       `json:"known_hosts"`
 	Settings   map[string]string `json:"settings"`
+	// Home is the home directory of the user who made the backup, so a restore
+	// under another account can relocate the absolute paths it carries.
+	Home string `json:"home,omitempty"`
 }
 
 // ExportAll builds a Snapshot of the whole store. Key private-key file bytes are
