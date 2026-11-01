@@ -126,9 +126,6 @@
     if (id != null) assignGroup(id, groupId);
   }
 
-  const KEY_SVG =
-    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3 21 2M16 7l3 3M18.5 4.5l2 2"/></svg>';
-
   async function assignGroup(hostId: number, groupId: number | null) {
     const h = app.hosts.find((x) => x.id === hostId);
     if (!h || (h.group_id ?? null) === groupId) return;
@@ -595,18 +592,24 @@
             <strong title="Drag onto a group in the sidebar to move">⠿ {h.alias}</strong>
             {#if h.port}
               {#if hasKey(h)}
-                <span class="keyicon on" title={keyTitle(h)} aria-label={keyTitle(h)} role="img">{@html KEY_SVG}</span>
+                <span class="keyicon on" title={keyTitle(h)}>
+                  <img src="/icons/key-on.gif" width="16" height="9" alt={keyTitle(h)} />
+                </span>
               {:else}
                 <button
                   class="keyicon off"
-                  class:spin={detectingId === h.id}
                   disabled={detectingId === h.id}
                   title={detectingId === h.id
                     ? "Checking which key the host accepts…"
                     : "No key assigned. Click to find the key this host accepts (ssh -v) and assign it"}
-                  aria-label="Detect the SSH key {h.alias} accepts"
-                  onclick={() => detectKey(h)}>{@html KEY_SVG}</button
+                  onclick={() => detectKey(h)}
                 >
+                  {#if detectingId === h.id}
+                    <img src="/icons/key-check.gif" width="16" height="9" alt="Checking {h.alias}'s key…" />
+                  {:else}
+                    <img src="/icons/key-none.gif" width="16" height="16" alt="Detect the SSH key {h.alias} accepts" />
+                  {/if}
+                </button>
               {/if}
             {/if}
             {#if isMounted(h)}<span class="tag" title="sshfs mounted">mounted</span>{/if}
@@ -829,10 +832,10 @@
     background: none;
     line-height: 0;
   }
-  .keyicon.on { color: var(--success); cursor: help; }
-  .keyicon.off { color: var(--muted); opacity: 0.6; cursor: pointer; border-radius: 4px; }
-  .keyicon.off:hover:not(:disabled) { opacity: 1; background: var(--panel-2); }
-  .keyicon.spin { animation: keypulse 1s ease-in-out infinite; }
-  @keyframes keypulse { 50% { opacity: 0.2; } }
+  .keyicon img { display: block; image-rendering: pixelated; }
+  .keyicon.on { cursor: help; }
+  .keyicon.off { cursor: pointer; border-radius: 4px; }
+  .keyicon.off:hover:not(:disabled) { background: var(--panel-2); }
+  .keyicon.off:disabled { cursor: progress; }
   .actions { flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 </style>
