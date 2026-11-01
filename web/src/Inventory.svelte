@@ -834,6 +834,7 @@
 {/if}
 
 {#if menu}
+  {#key menu}
   <ContextMenu
     x={menu.x}
     y={menu.y}
@@ -841,6 +842,7 @@
     items={hostMenuItems(menu.host)}
     onclose={() => (menu = null)}
   />
+  {/key}
 {/if}
 
 <style>

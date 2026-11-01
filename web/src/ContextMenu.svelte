@@ -12,7 +12,9 @@
 <script lang="ts">
   // A right-click menu of our own, replacing the browser's inside the page.
   // It opens at (x, y), is kept inside the viewport, and closes on Escape, a
-  // click outside, scrolling, resizing or the window losing focus.
+  // click outside, scrolling or resizing. Not on blur: a real right-click
+  // moves focus (tree node -> first menu item) and fires blur right after the
+  // menu opens, which closed it instantly.
   import { onMount, tick } from "svelte";
 
   let {
@@ -76,10 +78,13 @@
 <svelte:window
   onpointerdown={onpointerdown}
   onresize={onclose}
-  onblur={onclose}
   onscrollcapture={onclose}
   oncontextmenu={(e) => {
-    // A right-click elsewhere closes this menu; the target may open its own.
+    // A right-click elsewhere closes this menu - unless an opener already
+    // handled that very event (preventDefault) and replaced the menu. For real
+    // input the browser renders between listeners, so the menu opened by this
+    // event is already in the DOM when the event reaches window.
+    if (e.defaultPrevented) return;
     if (menu && !menu.contains(e.target as Node)) onclose();
   }}
 />
