@@ -1,4 +1,4 @@
-.PHONY: all ui build build-webview run clean deps dev icons syso build-windows setup-syso build-windows-setup launcher-syso build-windows-launcher uninstall-syso build-windows-uninstall install-desktop uninstall-desktop install-app-macos uninstall-app-macos dist dist-darwin dist-termux-src dist-windows dist-all
+.PHONY: all ui ui-icons build build-webview run clean deps dev icons syso build-windows setup-syso build-windows-setup launcher-syso build-windows-launcher uninstall-syso build-windows-uninstall install-desktop uninstall-desktop install-app-macos uninstall-app-macos dist dist-darwin dist-termux-src dist-windows dist-all
 
 BINARY := webssh
 # VERSION is stamped into the binary so the updater can compare it with the
@@ -30,11 +30,17 @@ all: build
 deps:
 	cd web && npm install
 
-# icons renders every raster size from assets/icon.svg (needs rsvg-convert).
+# icons renders every raster size from assets/icon.svg (needs rsvg-convert):
+# web/public/ (committed) plus assets/png/ for the launcher, .ico and archives.
 icons:
+	GEN_ICONS_ALL=1 ./assets/gen-icons.sh
+
+# ui-icons refreshes only what the SPA embeds. Those files are in git, so
+# without rsvg-convert this keeps them and the build goes on.
+ui-icons:
 	./assets/gen-icons.sh
 
-ui: icons
+ui: ui-icons
 	cd web && npm run build
 
 # build compiles the SPA then the Go binary (which embeds web/dist).
@@ -97,7 +103,7 @@ build-windows-setup: build-windows-launcher build-windows-uninstall setup-syso
 # offline. CGO is off, which makes the binary static (it runs on any glibc or
 # musl system) and cross-compiles without a C toolchain — the price is that a
 # release binary has no webview mode, since that one needs cgo and webkit.
-dist: ui
+dist: icons ui
 	rm -rf $(DIST_DIR)/$(DIST_NAME)
 	mkdir -p $(DIST_DIR)/$(DIST_NAME)/icons
 	CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH) \
@@ -117,7 +123,7 @@ dist: ui
 # webview mode there either). It has no .desktop file (that's a Linux thing),
 # but ships Info.plist.in, macos-launcher.sh.in and make-icns.sh so get.sh can
 # assemble a webssh.app bundle on the target Mac (iconutil only runs there).
-dist-darwin: ui
+dist-darwin: icons ui
 	rm -rf $(DIST_DIR)/$(BINARY)-$(VERSION)-darwin-$(ARCH)
 	mkdir -p $(DIST_DIR)/$(BINARY)-$(VERSION)-darwin-$(ARCH)/icons
 	CGO_ENABLED=0 GOOS=darwin GOARCH=$(ARCH) \
