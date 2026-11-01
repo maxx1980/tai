@@ -116,6 +116,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.enrichKeys(keyList)
+	s.linkIdentityHosts(keyList, hosts)
 	knownHosts, err := s.st.ListKnownHosts()
 	if err != nil {
 		writeErr(w, 500, err)
@@ -498,6 +499,47 @@ func (s *Server) enrichKeys(list []store.Key) {
 				list[i].InSSH = true
 				list[i].SSHPath = p
 			}
+		}
+	}
+}
+
+// linkIdentityHosts fills each key's IdentityHosts: the hosts whose
+// identity_file is that key's webssh file, its ~/.ssh copy, or any file whose
+// "<file>.pub" carries the same public key. Call after enrichKeys (SSHPath).
+func (s *Server) linkIdentityHosts(list []store.Key, hosts []store.Host) {
+	byPath := map[string]int{}  // cleaned private path -> key index
+	byPubID := map[string]int{} // public key identity -> key index
+	for i := range list {
+		list[i].IdentityHosts = []int64{}
+		for _, p := range []string{list[i].PrivatePath, list[i].SSHPath} {
+			if p != "" {
+				byPath[filepath.Clean(p)] = i
+			}
+		}
+		if id, ok := keys.PubKeyID(list[i].PublicKey); ok {
+			byPubID[id] = i
+		}
+	}
+	pubOf := map[string]string{} // path -> public key identity ("" if none)
+	for _, h := range hosts {
+		if h.IdentityFile == "" {
+			continue
+		}
+		p := filepath.Clean(expandHome(h.IdentityFile, s.paths.Home))
+		i, ok := byPath[p]
+		if !ok {
+			id, seen := pubOf[p]
+			if !seen {
+				if data, err := os.ReadFile(p + ".pub"); err == nil {
+					id, _ = keys.PubKeyID(string(data))
+				}
+				pubOf[p] = id
+			}
+			i, ok = byPubID[id]
+			ok = ok && id != ""
+		}
+		if ok {
+			list[i].IdentityHosts = append(list[i].IdentityHosts, h.ID)
 		}
 	}
 }

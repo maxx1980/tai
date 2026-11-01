@@ -338,6 +338,15 @@
         Deployed to {k.deployed_hosts.length} host(s){#if k.deployed_hosts.length}:
           {k.deployed_hosts.map(aliasOf).join(", ")}{/if}
       </div>
+      {#if k.identity_hosts?.length}
+        <div
+          class="muted"
+          style="font-size:12px"
+          title="Hosts whose IdentityFile is this key — ssh uses it for them, whether or not webssh deployed it"
+        >
+          IdentityFile on {k.identity_hosts.length} host(s): {k.identity_hosts.map(aliasOf).join(", ")}
+        </div>
+      {/if}
     </div>
   {/each}
 </div>

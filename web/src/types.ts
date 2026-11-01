@@ -41,6 +41,8 @@ export interface Key {
   private_path: string;
   has_passphrase: boolean;
   deployed_hosts: number[];
+  /** Hosts whose identity_file is this key (by path or .pub fingerprint). */
+  identity_hosts?: number[];
   in_ssh?: boolean;
   ssh_path?: string;
 }

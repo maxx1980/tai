@@ -236,7 +236,8 @@
   // ---- key badge ----
   // A host "has a key" when webssh knows which one it uses: an identity_file
   // (pinned in the exported ssh_config) or a key from Keys deployed to it.
-  const hostKeys = (h: Host) => app.keys.filter((k) => k.deployed_hosts?.includes(h.id));
+  const hostKeys = (h: Host) =>
+    app.keys.filter((k) => k.deployed_hosts?.includes(h.id) || k.identity_hosts?.includes(h.id));
   const hasKey = (h: Host) => !!h.identity_file || hostKeys(h).length > 0;
   function keyTitle(h: Host): string {
     const names = hostKeys(h).map((k) => k.name);

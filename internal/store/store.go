@@ -68,6 +68,10 @@ type Key struct {
 	PrivatePath   string  `json:"private_path"`
 	HasPassphrase bool    `json:"has_passphrase"`
 	DeployedHosts []int64 `json:"deployed_hosts"`
+	// IdentityHosts (computed, not persisted) are the hosts whose
+	// identity_file is this key — by path or by its .pub fingerprint. A key can
+	// be in use there without ever having been deployed through webssh.
+	IdentityHosts []int64 `json:"identity_hosts"`
 
 	// Computed at request time (not persisted): whether a copy of this key also
 	// lives in ~/.ssh, and where.
