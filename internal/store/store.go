@@ -553,6 +553,18 @@ func (s *Store) DeleteKey(id int64) error {
 	return err
 }
 
+// SetHostIdentityFile sets only a host's identity_file (and updated_at).
+func (s *Store) SetHostIdentityFile(hostID int64, path string) error {
+	res, err := s.db.Exec(`UPDATE hosts SET identity_file=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, path, hostID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("host %d not found", hostID)
+	}
+	return nil
+}
+
 // MarkKeyDeployed records that key was installed on host.
 func (s *Store) MarkKeyDeployed(keyID, hostID int64) error {
 	_, err := s.db.Exec(`INSERT OR IGNORE INTO host_keys (key_id, host_id) VALUES (?, ?)`, keyID, hostID)

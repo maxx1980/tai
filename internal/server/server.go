@@ -219,6 +219,7 @@ func (s *Server) routes() {
 	api("POST /api/hosts/bulk", s.handleBulkCreateHosts)
 	api("PUT /api/hosts/{id}", s.handleUpdateHost)
 	api("DELETE /api/hosts/{id}", s.handleDeleteHost)
+	api("POST /api/hosts/{id}/detect-key", s.handleDetectKey)
 
 	// Network discovery: find machines with SSH/telnet open, then add them.
 	api("POST /api/scan", s.handleScan)
