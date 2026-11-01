@@ -113,6 +113,7 @@ func (s *Server) exportEncrypted(password string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	snap.Home = s.paths.Home
 	// Read each key's private-key file into the snapshot so backups are portable.
 	for i := range snap.Keys {
 		k := &snap.Keys[i]
@@ -151,6 +152,9 @@ func (s *Server) restoreEncrypted(password string, data []byte) (*store.Snapshot
 	if err := validateRestoredKeys(&snap); err != nil {
 		return nil, 400, err
 	}
+	// Remember where the backup's paths pointed before key paths are rewritten
+	// below, so settings and identity files can follow them to this $HOME.
+	oldHomes := snapshotHomes(&snap)
 
 	// Build the complete replacement keyset beside the live directory. Nothing
 	// visible is changed until every file has been written successfully.
@@ -172,6 +176,7 @@ func (s *Server) restoreEncrypted(password string, data []byte) (*store.Snapshot
 	// The database now points at the installed keyset. Failure to remove the
 	// retired directory is harmless: it is no longer the active path.
 	_ = keyset.commit()
+	s.relocateHome(oldHomes)
 	// The restore may have changed authentication settings or introduced a
 	// different master password. Apply the token setting immediately and drop all
 	// unlock sessions so no pre-restore authorization survives.

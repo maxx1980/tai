@@ -796,9 +796,21 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	// A later setting write can fail after auth_disabled was already persisted.
 	// Defer the refresh so the cache still follows the database on every exit.
 	defer s.syncAuthDisabled()
+	defaults := config.Defaults(s.paths.Home)
 	for k, v := range body {
 		if k == config.KeyMasterPassword {
 			continue // reserved: set only via PUT /api/settings/password
+		}
+		// The SPA sends the whole form, defaults included. Storing a default
+		// would freeze it — e.g. mount_base_dir as /home/<this user>/mnt/webssh,
+		// which then breaks under another account after a backup restore. Drop
+		// the row instead so the default keeps being derived from $HOME.
+		if def, ok := defaults[k]; ok && v == def {
+			if err := s.st.DeleteSetting(k); err != nil {
+				writeErr(w, 500, fmt.Errorf("save %s: %w", k, err))
+				return
+			}
+			continue
 		}
 		if err := s.st.SetSetting(k, v); err != nil {
 			writeErr(w, 500, fmt.Errorf("save %s: %w", k, err))

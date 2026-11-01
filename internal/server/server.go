@@ -87,6 +87,11 @@ func New(st *store.Store, paths config.Paths, token string, assets fs.FS, hc *he
 		quit:     make(chan struct{}),
 	}
 	s.syncAuthDisabled()
+	// The data directory may have come from another account; point its stored
+	// paths at this $HOME before anything uses them.
+	if s.relocateHome(nil) {
+		s.autoExport()
+	}
 	s.routes()
 	return s
 }
