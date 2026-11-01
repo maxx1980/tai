@@ -268,6 +268,11 @@ func (s *Server) routes() {
 
 	api("PUT /api/settings", s.handleUpdateSettings)
 
+	// Passwordless sudo for the current user (/etc/sudoers.d/<user>).
+	api("GET /api/system/sudo", s.handleSudoStatus)
+	api("POST /api/system/sudo", s.handleSudoEnable)
+	api("DELETE /api/system/sudo", s.handleSudoDisable)
+
 	// Websockets (token via query param — browsers can't set headers on WS).
 	s.mux.HandleFunc("/api/terminal/{id}", s.handleTerminal)
 	s.mux.HandleFunc("/api/presence", s.handlePresence)
