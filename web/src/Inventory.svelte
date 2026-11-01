@@ -13,6 +13,8 @@
   } from "./types";
   import Modal from "./Modal.svelte";
   import ScanPanel from "./ScanPanel.svelte";
+  import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
+  import { tick } from "svelte";
 
   let {
     onEditHost,
@@ -108,6 +110,81 @@
     const n = new Set(collapsed);
     n.has(id) ? n.delete(id) : n.add(id);
     collapsed = n;
+  }
+
+  // ---- tree host: left click reveals, right click opens the menu ----
+
+  let selectedHostId = $state<number | null>(null);
+
+  // revealHost opens the host's group in the card list, unfolds the tree down
+  // to it, highlights it in both places and scrolls its card into view. Search
+  // and tag filters that would hide it are cleared.
+  async function revealHost(h: Host) {
+    const n = new Set(collapsed);
+    if (h.group_id == null) n.delete(MISC);
+    for (let id = h.group_id ?? null; id != null; ) {
+      n.delete(id);
+      id = app.groups.find((g) => g.id === id)?.parent_id ?? null;
+    }
+    collapsed = n;
+    selectedGroup = h.group_id ?? null;
+    selectedHostId = h.id;
+    if (!visible.some((x) => x.id === h.id)) {
+      query = "";
+      activeTags = new Set();
+    }
+    await tick();
+    document.getElementById(`hcard-${h.id}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+
+  let menu = $state<{ x: number; y: number; host: Host } | null>(null);
+
+  function openHostMenu(e: MouseEvent | KeyboardEvent, h: Host) {
+    e.preventDefault();
+    let x: number, y: number;
+    if (e instanceof MouseEvent && (e.clientX || e.clientY)) {
+      x = e.clientX;
+      y = e.clientY;
+    } else {
+      // From the keyboard (Menu key, Shift+F10): anchor under the node.
+      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      x = r.left + 24;
+      y = r.bottom;
+    }
+    selectedHostId = h.id;
+    menu = { x, y, host: h };
+  }
+
+  // A free alias for a copy: "<alias>-copy", then "-copy2", "-copy3"…
+  function copyAlias(alias: string): string {
+    const taken = new Set(app.hosts.map((x) => x.alias));
+    let name = `${alias}-copy`;
+    for (let i = 2; taken.has(name); i++) name = `${alias}-copy${i}`;
+    return name;
+  }
+
+  // Copy host opens the editor on an unsaved duplicate (id 0 → created on
+  // Save). A saved password is never sent to the browser, so it is not copied.
+  function copyHost(h: Host) {
+    onEditHost({
+      ...h,
+      id: 0,
+      alias: copyAlias(h.alias),
+      tags: [...h.tags],
+      extra_options: { ...h.extra_options },
+      has_password: false,
+    });
+  }
+
+  function hostMenuItems(h: Host): MenuItem[] {
+    const noSSH = !h.port;
+    return [
+      { label: "Terminal", action: () => launchTerminal(h), disabled: noSSH },
+      { label: "Web terminal", action: () => onOpenTerminal(h, "ssh"), disabled: noSSH },
+      { label: "Edit host", action: () => onEditHost(h), separator: true },
+      { label: "Copy host", action: () => copyHost(h) },
+      { label: "Delete host", action: () => deleteHost(h), danger: true, separator: true },
+    ];
   }
 
   // ---- drag & drop: move a host into a group ----
@@ -416,10 +493,11 @@
 
 {#snippet hostNode(h: Host, depth: number)}
   <div
-    class="tnode host {dragHostId === h.id ? 'dragging' : ''}"
+    class="tnode host {dragHostId === h.id ? 'dragging' : ''} {selectedHostId === h.id ? 'active' : ''}"
     style="padding-left:{10 + depth * 14}px"
     role="treeitem"
-    aria-selected="false"
+    aria-selected={selectedHostId === h.id}
+    aria-haspopup="menu"
     tabindex="0"
     draggable="true"
     ondragstart={(e) => onHostDragStart(e, h)}
@@ -427,9 +505,13 @@
       dragHostId = null;
       dropTarget = null;
     }}
-    onclick={() => onEditHost(h)}
-    onkeydown={(e) => e.key === "Enter" && onEditHost(h)}
-    title="Drag onto a group to move · click to edit"
+    onclick={() => revealHost(h)}
+    oncontextmenu={(e) => openHostMenu(e, h)}
+    onkeydown={(e) => {
+      if (e.key === "Enter") revealHost(h);
+      else if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) openHostMenu(e, h);
+    }}
+    title="Click to show · right-click for actions · drag onto a group to move"
   >
     <span class="ticon">{isMounted(h) ? "🟢" : "🖥️"}</span>
     <span class="tlabel mono">{h.alias}</span>
@@ -576,7 +658,8 @@
     <div class="cards">
       {#each visible as h (h.id)}
         <div
-          class="hcard {dragHostId === h.id ? 'dragging' : ''}"
+          id="hcard-{h.id}"
+          class="hcard {dragHostId === h.id ? 'dragging' : ''} {selectedHostId === h.id ? 'selected' : ''}"
           draggable="true"
           ondragstart={(e) => onHostDragStart(e, h)}
           ondragend={() => {
@@ -750,6 +833,16 @@
   </Modal>
 {/if}
 
+{#if menu}
+  <ContextMenu
+    x={menu.x}
+    y={menu.y}
+    label="Actions for {menu.host.alias}"
+    items={hostMenuItems(menu.host)}
+    onclose={() => (menu = null)}
+  />
+{/if}
+
 <style>
   .inv { display: grid; grid-template-columns: 240px 1fr; gap: 16px; height: 100%; min-height: 0; }
   .sidebar { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
@@ -770,6 +863,7 @@
   .tnode.grp.active { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
   .tnode.drop { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 22%, transparent); }
   .tnode.host { cursor: grab; font-size: 13px; }
+  .tnode.host.active { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
   .tnode.host:active { cursor: grabbing; }
   .tnode.dragging { opacity: 0.4; }
   .caret {
@@ -814,6 +908,7 @@
     display: flex; flex-direction: column; gap: 8px;
   }
   .hcard.dragging { opacity: 0.4; }
+  .hcard.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
   .hcard strong { cursor: grab; }
   .hdot {
     flex: none;
